@@ -2,7 +2,7 @@ import type { Point3 } from "./types";
 
 export type EffectCategory = "SMOKE";
 
-export type SmokeEmissionType = "MOUTH_BURST" | "NOSE_BURST";
+export type SmokeEmissionType = "MOUTH_BURST" | "NOSE_BURST" | "SMOKE_RING";
 
 interface SmokeEmissionBase {
   category: "SMOKE";
@@ -18,4 +18,7 @@ export type SmokeEmission =
   | SmokeEmissionBase & {
       type: "NOSE_BURST";
       secondaryOrigin: Point3;
+    }
+  | SmokeEmissionBase & {
+      type: "SMOKE_RING";
     };

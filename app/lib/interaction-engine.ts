@@ -1,4 +1,5 @@
-import type { SmokeEmission } from "./effects";
+import type { SmokeEmission, SmokeEmissionType } from "./effects";
+import type { MouthShape } from "./gestures";
 import { addScaled, clamp, distance, expSmoothing, lerp, lerpPoint, normalize } from "./math";
 import { useInteractionStore } from "./store";
 import type { CigaretteState, FaceAnalysis, HandAnalysis, InteractionSnapshot, Point3 } from "./types";
@@ -12,6 +13,8 @@ const FULL_BURN_SECONDS = 7 * 1.4;
 const MIN_INHALE_SECONDS = 0.25;
 const NOSE_EXHALE_DELAY_MS = 3000;
 const EFFECT_LABEL_MS = 900;
+const RING_MIN_OPEN_RATIO = 0.14;
+const RING_HOLD_MS = 100;
 
 function isMouthState(state: CigaretteState) {
   return state === "MOUTH_LEFT" || state === "MOUTH_CENTER" || state === "MOUTH_RIGHT";
@@ -51,7 +54,13 @@ export class InteractionEngine {
   private fallVelocity: Point3 = { x: 0, y: 0, z: 0 };
   private mouthBurstCount = 0;
   private noseBurstCount = 0;
+  private smokeRingCount = 0;
+  private lastEffect: SmokeEmissionType | "NONE" = "NONE";
   private lastDebugUpdate = 0;
+  private previousMouthShape: MouthShape | null = null;
+  private ringArmed = false;
+  private ringRequiresExit = false;
+  private ringQualificationStartedAt = 0;
 
   constructor(private emit: (emission: SmokeEmission) => void) {}
 
@@ -188,6 +197,16 @@ export class InteractionEngine {
   }
 
   private updateSmoking(face: FaceAnalysis, now: number, dt: number) {
+    const currentMouthShape: MouthShape | null = face.visible ? face.mouthShape : null;
+    const enteredOShape = currentMouthShape === "O_SHAPE"
+      && this.previousMouthShape !== null
+      && this.previousMouthShape !== "O_SHAPE";
+    this.previousMouthShape = currentMouthShape;
+    if (face.visible && currentMouthShape !== "O_SHAPE") {
+      this.ringRequiresExit = false;
+      this.ringQualificationStartedAt = 0;
+    }
+
     const heldNearMouth = (this.snapshot.cigaretteState === "HAND_HELD" || this.snapshot.cigaretteState === "FINGER_HELD")
       && distance(this.snapshot.cigarettePosition, face.mouthCenter)
         <= Math.max(face.mouthWidth * 1.25, this.snapshot.cigaretteBaseLength * 0.9);
@@ -202,6 +221,9 @@ export class InteractionEngine {
         this.inhaleSeconds = 0;
         this.snapshot.smokeReady = false;
         this.smokeReadyAt = 0;
+        this.ringArmed = false;
+        this.ringRequiresExit = false;
+        this.ringQualificationStartedAt = 0;
       }
       this.inhaleSeconds += dt;
       this.snapshot.inhaleSeconds = this.inhaleSeconds;
@@ -210,10 +232,43 @@ export class InteractionEngine {
       this.snapshot.smokingState = "INHALING";
       if (this.snapshot.cigaretteBurn >= 1) this.startFalling(now);
     } else if (this.inhaleActive) {
-      this.finishInhale(now);
+      this.finishInhale(now, currentMouthShape, true);
     }
 
-    if (this.snapshot.smokeReady && face.visible && face.mouthState === "OPEN") {
+    const ringCriteriaValid = face.visible
+      && face.mouthShape === "O_SHAPE"
+      && face.mouthState === "OPEN"
+      && face.mouthOpenRatio >= RING_MIN_OPEN_RATIO;
+    if (!this.snapshot.smokeReady || !this.ringArmed || this.ringRequiresExit || !ringCriteriaValid) {
+      this.ringQualificationStartedAt = 0;
+    } else if (enteredOShape) {
+      this.ringQualificationStartedAt = now;
+    }
+
+    const ringQualificationInProgress = ringCriteriaValid
+      && this.ringQualificationStartedAt > 0
+      && now - this.ringQualificationStartedAt < RING_HOLD_MS;
+    const existingOShapeBlocksLegacyExhale = this.ringRequiresExit
+      && currentMouthShape === "O_SHAPE"
+      && face.mouthState === "OPEN"
+      && face.mouthOpenRatio >= RING_MIN_OPEN_RATIO;
+    if (
+      this.snapshot.smokeReady
+      && this.ringArmed
+      && !this.ringRequiresExit
+      && ringCriteriaValid
+      && this.ringQualificationStartedAt > 0
+      && now - this.ringQualificationStartedAt >= RING_HOLD_MS
+    ) {
+      this.emitSmokeRing(face, now);
+      return;
+    } else if (
+      this.snapshot.smokeReady
+      && face.visible
+      && face.mouthState === "OPEN"
+      && !existingOShapeBlocksLegacyExhale
+      && !ringQualificationInProgress
+    ) {
       this.emitMouthBurst(face, now);
       return;
     } else if (
@@ -229,13 +284,16 @@ export class InteractionEngine {
     if (now >= this.effectUntil && !shouldInhale) this.setRestingSmokingState();
   }
 
-  private finishInhale(now: number) {
+  private finishInhale(now: number, mouthShape: MouthShape | null = null, armRing = false) {
     this.inhaleActive = false;
     this.snapshot.inhaleSeconds = this.inhaleSeconds;
     if (this.inhaleSeconds >= MIN_INHALE_SECONDS) {
       this.snapshot.smokeReady = true;
       this.smokeReadyAt = now;
       this.pendingSmokeStrength = clamp(this.inhaleSeconds / 1.4, 0.45, 1.35);
+      this.ringArmed = armRing;
+      this.ringRequiresExit = armRing && mouthShape === "O_SHAPE";
+      this.ringQualificationStartedAt = 0;
     }
   }
 
@@ -248,6 +306,7 @@ export class InteractionEngine {
       strength: this.pendingSmokeStrength,
     });
     this.mouthBurstCount += 1;
+    this.lastEffect = "MOUTH_BURST";
     this.consumePendingSmoke();
     this.snapshot.smokingState = "MOUTH_BURST";
     this.effectUntil = now + EFFECT_LABEL_MS;
@@ -263,18 +322,37 @@ export class InteractionEngine {
       strength: this.pendingSmokeStrength,
     });
     this.noseBurstCount += 1;
+    this.lastEffect = "NOSE_BURST";
     this.consumePendingSmoke();
     this.snapshot.smokingState = "NOSE_BURST";
+    this.effectUntil = now + EFFECT_LABEL_MS;
+  }
+
+  private emitSmokeRing(face: FaceAnalysis, now: number) {
+    this.emit({
+      category: "SMOKE",
+      type: "SMOKE_RING",
+      origin: face.mouthCenter,
+      direction: normalize({ x: Math.sin(face.yaw * Math.PI / 180) * 0.4, y: -0.25, z: 1 }),
+      strength: this.pendingSmokeStrength,
+    });
+    this.smokeRingCount += 1;
+    this.lastEffect = "SMOKE_RING";
+    this.consumePendingSmoke();
+    this.snapshot.smokingState = "MOUTH_BURST";
     this.effectUntil = now + EFFECT_LABEL_MS;
   }
 
   private consumePendingSmoke() {
     this.snapshot.smokeReady = false;
     this.smokeReadyAt = 0;
+    this.ringArmed = false;
+    this.ringRequiresExit = false;
+    this.ringQualificationStartedAt = 0;
   }
 
   private startFalling(now: number) {
-    this.finishInhale(now);
+    this.finishInhale(now, null, false);
     this.snapshot.cigaretteState = "FALLING";
     this.snapshot.cigaretteMouthSide = null;
     this.snapshot.smokingState = "CIGARETTE_FALLING";
@@ -354,6 +432,8 @@ export class InteractionEngine {
       smokeReadySeconds: this.snapshot.smokeReady && this.smokeReadyAt > 0 ? Math.max(0, (now - this.smokeReadyAt) / 1000) : 0,
       mouthBurstCount: this.mouthBurstCount,
       noseBurstCount: this.noseBurstCount,
+      smokeRingCount: this.smokeRingCount,
+      lastEffect: this.lastEffect,
       pinchDistance: this.snapshot.pinchDistance,
       delegate: this.snapshot.delegate,
     });

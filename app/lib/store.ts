@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { SmokeEmissionType } from "./effects";
 import type { CigaretteState, HandState, MouthShape, MouthState, SmokingState } from "./types";
 
 export interface RuntimeDebugState {
@@ -21,6 +22,8 @@ export interface RuntimeDebugState {
   smokeReadySeconds: number;
   mouthBurstCount: number;
   noseBurstCount: number;
+  smokeRingCount: number;
+  lastEffect: SmokeEmissionType | "NONE";
   baseSmokeParticles: number;
   particleDrawCount: number;
   pinchDistance: number;
@@ -62,6 +65,8 @@ export const useInteractionStore = create<RuntimeDebugState>((set) => ({
   smokeReadySeconds: 0,
   mouthBurstCount: 0,
   noseBurstCount: 0,
+  smokeRingCount: 0,
+  lastEffect: "NONE",
   baseSmokeParticles: 0,
   particleDrawCount: 0,
   pinchDistance: 0,

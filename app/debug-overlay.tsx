@@ -39,6 +39,8 @@ export function DebugOverlay() {
         <dt>INHALE</dt><dd>{metric(state.inhaleSeconds, 1)}s</dd>
         <dt>SMOKE READY</dt><dd>{state.smokeReady ? `${metric(state.smokeReadySeconds, 1)}s` : "NO"}</dd>
         <dt>BURSTS M/N</dt><dd>{state.mouthBurstCount} / {state.noseBurstCount}</dd>
+        <dt>LAST EFFECT</dt><dd>{state.lastEffect}</dd>
+        <dt>RING COUNT</dt><dd>{state.smokeRingCount}</dd>
         <dt>TIP SMOKE</dt><dd>{state.baseSmokeParticles}</dd>
         <dt>GPU POINTS</dt><dd>{state.particleDrawCount}</dd>
         <dt>PINCH</dt><dd>{metric(state.pinchDistance)}</dd>

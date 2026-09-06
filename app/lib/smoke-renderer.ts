@@ -19,6 +19,7 @@ const vertexShader = `
   varying float vAlpha;
   varying float vKind;
   varying float vSeed;
+  varying float vLifeT;
 
   void main() {
     float age = uTime - aSpawnTime;
@@ -26,20 +27,36 @@ const vertexShader = `
     float alive = step(0.0, age) * (1.0 - step(aLifetime, age));
     float curl = sin(age * (1.5 + aSeed * 1.8) + aSeed * 12.0);
     float crossCurl = cos(age * (1.1 + aSeed) + aSeed * 7.0);
-    float mouthSmoke = step(0.5, aKind);
-    float exhaleSmoke = step(1.5, aKind);
+    float ringSmoke = step(2.5, aKind);
+    float ringCore = ringSmoke * (1.0 - step(3.5, aKind));
+    float ringHaze = step(3.5, aKind) * (1.0 - step(4.5, aKind));
+    float ringWake = step(4.5, aKind);
+    float mouthSmoke = step(0.5, aKind) * (1.0 - ringSmoke);
+    float exhaleSmoke = step(1.5, aKind) * (1.0 - ringSmoke);
     vec3 position = aStart + aVelocity * age;
-    position.x += curl * age * age * (mix(0.004, 0.011, mouthSmoke) + exhaleSmoke * 0.004);
-    position.y += crossCurl * age * mix(0.003, 0.007, mouthSmoke);
-    position.y -= age * age * (mix(0.005, 0.011, mouthSmoke) + exhaleSmoke * 0.003);
+    position.x += curl * age * age * (mix(0.004, 0.011, mouthSmoke) + exhaleSmoke * 0.004) * (1.0 - ringSmoke);
+    position.y += crossCurl * age * mix(0.003, 0.007, mouthSmoke) * (1.0 - ringSmoke);
+    position.y -= age * age * (mix(0.005, 0.011, mouthSmoke) + exhaleSmoke * 0.003) * (1.0 - ringSmoke);
+    float ringTurbulence = smoothstep(0.46, 0.94, lifeT);
+    float ringPeel = smoothstep(0.56, 1.0, lifeT);
+    position.x += ringSmoke * sin(age * (2.1 + aSeed * 2.4) + aSeed * 9.0) * age * age
+      * (0.0002 + ringTurbulence * (0.0055 + ringWake * ringPeel * 0.002));
+    position.y += ringSmoke * cos(age * (1.7 + aSeed * 1.6) + aSeed * 5.0) * age * age
+      * (0.00015 + ringTurbulence * (0.0035 + ringWake * ringPeel * 0.0015));
+    position.y -= ringSmoke * age * age * (0.0012 + ringWake * ringPeel * 0.0008);
 
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mvPosition;
     gl_PointSize = aSize * uPixelRatio * mix(0.72, 3.45, smoothstep(0.0, 0.78, lifeT));
     gl_PointSize *= alive;
+    gl_PointSize *= mix(1.0, 1.16, ringSmoke * smoothstep(0.18, 0.82, lifeT));
+    gl_PointSize *= mix(1.0, 0.84, ringCore);
+    gl_PointSize *= mix(1.0, 1.08, ringHaze);
+    gl_PointSize *= mix(1.0, 0.92, ringWake);
     vAlpha = alive * smoothstep(0.0, 0.05, lifeT) * (1.0 - smoothstep(0.48, 1.0, lifeT));
     vKind = aKind;
     vSeed = aSeed;
+    vLifeT = lifeT;
   }
 `;
 
@@ -48,6 +65,7 @@ const fragmentShader = `
   varying float vAlpha;
   varying float vKind;
   varying float vSeed;
+  varying float vLifeT;
 
   float hash(vec2 point) {
     return fract(sin(dot(point, vec2(127.1, 311.7))) * 43758.5453123);
@@ -88,10 +106,22 @@ const fragmentShader = `
     float brokenEdge = radius + (broadNoise - 0.5) * 0.48 + (fineNoise - 0.5) * 0.14;
     float envelope = 1.0 - smoothstep(0.32, 1.03, brokenEdge);
     float wisps = mix(0.48, 1.0, smoothstep(0.25, 0.88, broadNoise * 0.72 + fineNoise * 0.28));
-    float mouthSmoke = step(0.5, vKind);
-    float exhaleSmoke = step(1.5, vKind);
+    float ringSmoke = step(2.5, vKind);
+    float ringHaze = step(3.5, vKind) * (1.0 - step(4.5, vKind));
+    float ringWake = step(4.5, vKind);
+    float mouthSmoke = step(0.5, vKind) * (1.0 - ringSmoke);
+    float exhaleSmoke = step(1.5, vKind) * (1.0 - ringSmoke);
     float opacity = mix(0.068, 0.055, mouthSmoke) + exhaleSmoke * 0.007;
-    float alpha = vAlpha * envelope * wisps * opacity;
+    float ringEarly = 1.0 - smoothstep(0.0, 0.5, vLifeT);
+    float ringOpacity = mix(0.052, 0.074, ringEarly);
+    ringOpacity *= mix(1.0, 0.62, ringHaze);
+    ringOpacity *= mix(1.0, 0.46, ringWake);
+    float ringSpawnBoost = 1.0 + 0.1 * (1.0 - smoothstep(0.0, 0.045, vLifeT));
+    opacity = mix(opacity, ringOpacity * ringSpawnBoost, ringSmoke);
+    float ringGaps = smoothstep(0.26, 0.74, broadNoise * 0.7 + fineNoise * 0.3);
+    float ringBreakup = mix(1.0, ringGaps, ringSmoke * smoothstep(0.5, 0.96, vLifeT));
+    float ringFade = 1.0 - ringSmoke * smoothstep(0.72, 1.0, vLifeT);
+    float alpha = vAlpha * envelope * wisps * opacity * ringBreakup * ringFade;
     vec3 color = vec3(0.4117647);
     if (alpha < 0.0015) discard;
     gl_FragColor = vec4(color, alpha);
@@ -387,6 +417,7 @@ export class SmokeRenderer {
   emit(emission: SmokeEmission) {
     if (emission.type === "MOUTH_BURST") this.emitMouthBurst(emission);
     if (emission.type === "NOSE_BURST") this.emitNoseBurst(emission);
+    if (emission.type === "SMOKE_RING") this.emitSmokeRing(emission);
   }
 
   private emitMouthBurst(emission: Extract<SmokeEmission, { type: "MOUTH_BURST" }>) {
@@ -443,11 +474,99 @@ export class SmokeRenderer {
     this.markParticlesDirty();
   }
 
+  private emitSmokeRing(emission: Extract<SmokeEmission, { type: "SMOKE_RING" }>) {
+    const factor = this.qualityFactor();
+    const count = Math.round((400 + emission.strength * 180) * factor);
+    const coreCount = Math.round(count * 0.62);
+    const hazeCount = Math.round(count * 0.23);
+    const wakeCount = count - coreCount - hazeCount;
+    const origin = this.mapPoint(emission.origin);
+    const coreRadiusX = 0.015 + emission.strength * 0.005;
+    const coreRadiusY = coreRadiusX * (this.width / this.height);
+    const hazeRadiusX = coreRadiusX * 1.2;
+    const hazeRadiusY = hazeRadiusX * (this.width / this.height);
+    const coreExpansionX = coreRadiusX * 1.28;
+    const coreExpansionY = coreExpansionX * (this.width / this.height);
+    const hazeExpansionX = coreExpansionX * 1.08;
+    const hazeExpansionY = hazeExpansionX * (this.width / this.height);
+    const travel = 0.073 + emission.strength * 0.014;
+    const ringLifetime = 2.55 + emission.strength * 0.72;
+
+    for (let index = 0; index < coreCount; index += 1) {
+      const theta = (index / coreCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.012;
+      const radiusScale = 0.965 + Math.random() * 0.07;
+      const radialX = Math.cos(theta);
+      const radialY = Math.sin(theta);
+      const radialBand = (Math.random() - 0.5) * 0.0016;
+      this.spawn(
+        {
+          x: origin.x + radialX * (coreRadiusX * radiusScale + radialBand),
+          y: origin.y + radialY * (coreRadiusY * radiusScale + radialBand * (this.width / this.height)),
+          z: origin.z,
+        },
+        {
+          x: emission.direction.x * travel + radialX * coreExpansionX,
+          y: -0.004 + emission.direction.y * travel * 0.12 + radialY * coreExpansionY,
+          z: 0,
+        },
+        3,
+        ringLifetime * (0.97 + Math.random() * 0.06),
+        6 + Math.random() * 6,
+      );
+    }
+
+    for (let index = 0; index < hazeCount; index += 1) {
+      const theta = (index / hazeCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.04;
+      const radiusScale = 1.08 + Math.random() * 0.24;
+      const radialX = Math.cos(theta);
+      const radialY = Math.sin(theta);
+      const radialBand = (Math.random() - 0.5) * 0.003;
+      this.spawn(
+        {
+          x: origin.x + radialX * (hazeRadiusX * radiusScale + radialBand),
+          y: origin.y + radialY * (hazeRadiusY * radiusScale + radialBand * (this.width / this.height)),
+          z: origin.z,
+        },
+        {
+          x: emission.direction.x * travel * 0.96 + radialX * hazeExpansionX,
+          y: -0.003 + emission.direction.y * travel * 0.1 + radialY * hazeExpansionY,
+          z: 0,
+        },
+        4,
+        ringLifetime * (0.9 + Math.random() * 0.18),
+        12 + Math.random() * 10,
+      );
+    }
+
+    for (let index = 0; index < wakeCount; index += 1) {
+      const theta = (index / wakeCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.08;
+      const radiusScale = 0.98 + Math.random() * 0.16;
+      const radialX = Math.cos(theta);
+      const radialY = Math.sin(theta);
+      this.spawn(
+        {
+          x: origin.x + radialX * (coreRadiusX * radiusScale) - emission.direction.x * 0.004,
+          y: origin.y + radialY * (coreRadiusY * radiusScale) - emission.direction.y * 0.004,
+          z: origin.z,
+        },
+        {
+          x: emission.direction.x * travel * (0.26 + Math.random() * 0.18) + radialX * coreExpansionX * 0.42,
+          y: -0.001 + emission.direction.y * travel * 0.06 + radialY * coreExpansionY * 0.42,
+          z: 0,
+        },
+        5,
+        0.8 + emission.strength * 0.14 + Math.random() * 0.32,
+        8 + Math.random() * 7,
+      );
+    }
+    this.markParticlesDirty();
+  }
+
   private spawn(origin: Point3, velocity: Point3, kind: number, lifetime: number, size: number) {
     const index = this.cursor;
     this.cursor = (this.cursor + 1) % MAX_PARTICLES;
     const base = index * 3;
-    const originJitter = kind >= 1 ? 0.01 : 0.004;
+    const originJitter = kind >= 3 ? 0.0008 : kind >= 1 ? 0.01 : 0.004;
     this.starts[base] = origin.x + (Math.random() - 0.5) * originJitter;
     this.starts[base + 1] = origin.y + (Math.random() - 0.5) * originJitter;
     this.starts[base + 2] = 0.3;
