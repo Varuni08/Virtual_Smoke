@@ -1,5 +1,5 @@
 import { clamp, distance, expSmoothing, lerp, lerpPoint, midpoint, mirrorPoint } from "./math";
-import type { MouthState } from "./gestures";
+import type { MouthShape, MouthState } from "./gestures";
 import type { FaceAnalysis, HandAnalysis, Point3 } from "./types";
 
 const FACE = {
@@ -27,6 +27,16 @@ const HAND = {
   pinkyMcp: 17,
 };
 
+const O_SHAPE_CALIBRATION = {
+  enterOpenRatio: 0.11,
+  enterWidthRatio: 0.36,
+  exitOpenRatio: 0.085,
+  exitWidthRatio: 0.39,
+  scoreOpenFloor: 0.075,
+  scoreOpenCeiling: 0.14,
+  scoreWidthFloor: 0.31,
+};
+
 function pointAt(points: Point3[], index: number, fallback: Point3 = { x: 0.5, y: 0.5, z: 0 }) {
   return points[index] ?? fallback;
 }
@@ -52,6 +62,8 @@ function emptyFace(): FaceAnalysis {
     mouthOpenRatio: 0,
     mouthPursed: false,
     mouthState: "CLOSED",
+    mouthShape: "NEUTRAL",
+    oShapeScore: 0,
     yaw: 0,
     roll: 0,
   };
@@ -99,6 +111,8 @@ export class FaceAnalyzer {
     const yaw = clamp((mouthCenter.x - center.x) / faceWidth * 135, -60, 60);
     const roll = Math.atan2(mouthRight.y - mouthLeft.y, mouthRight.x - mouthLeft.x);
     const mouthState = this.classifyMouth(mouthOpenRatio, mouthPursed);
+    const mouthShape = this.classifyMouthShape(mouthOpenRatio, mouthWidthRatio, mouthPursed);
+    const oShapeScore = this.calculateOShapeScore(mouthOpenRatio, mouthWidthRatio);
 
     this.lastSeenAt = now;
     this.last = {
@@ -120,6 +134,8 @@ export class FaceAnalyzer {
       mouthOpenRatio,
       mouthPursed,
       mouthState,
+      mouthShape,
+      oShapeScore,
       yaw,
       roll,
     };
@@ -130,6 +146,26 @@ export class FaceAnalyzer {
     if (pursed) return "CLOSED";
     const threshold = this.last.mouthState === "OPEN" ? 0.06 : 0.075;
     return aspect >= threshold ? "OPEN" : "CLOSED";
+  }
+
+  private classifyMouthShape(openRatio: number, widthRatio: number, pursed: boolean): MouthShape {
+    const calibration = O_SHAPE_CALIBRATION;
+    const oShape = this.last.mouthShape === "O_SHAPE"
+      ? openRatio >= calibration.exitOpenRatio && widthRatio <= calibration.exitWidthRatio
+      : openRatio >= calibration.enterOpenRatio && widthRatio <= calibration.enterWidthRatio;
+    if (oShape) return "O_SHAPE";
+    return pursed ? "PURSED" : "NEUTRAL";
+  }
+
+  private calculateOShapeScore(openRatio: number, widthRatio: number) {
+    const calibration = O_SHAPE_CALIBRATION;
+    const openScore = clamp(
+      (openRatio - calibration.scoreOpenFloor) / (calibration.scoreOpenCeiling - calibration.scoreOpenFloor),
+    );
+    const widthScore = clamp(
+      (calibration.exitWidthRatio - widthRatio) / (calibration.exitWidthRatio - calibration.scoreWidthFloor),
+    );
+    return openScore * widthScore;
   }
 }
 

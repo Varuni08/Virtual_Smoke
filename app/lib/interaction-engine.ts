@@ -341,6 +341,8 @@ export class InteractionEngine {
       handVisible: this.snapshot.handVisible,
       handState: this.snapshot.handState,
       mouthState: face.mouthState,
+      mouthShape: face.mouthShape,
+      oShapeScore: face.oShapeScore,
       mouthPursed: face.mouthPursed,
       cigaretteState: this.snapshot.cigaretteState,
       smokingState: this.snapshot.smokingState,

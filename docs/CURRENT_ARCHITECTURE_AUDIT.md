@@ -618,3 +618,11 @@ Phase 2 adds two type-only architectural boundaries without changing landmark ca
 Gesture state now flows conceptually from raw MediaPipe landmarks through `FaceAnalyzer`/`HandAnalyzer`, into shared gesture contracts consumed by `InteractionEngine`. The engine emits typed smoke-category commands to `SmokeRenderer`. The renderer's emitter selection, particle implementation, shaders, and visual behavior remain unchanged.
 
 The analyzers still perform gesture classification alongside geometric analysis, and the interaction engine and renderer remain cigarette/smoke-specific. Separate recognizers, pure state reducers, an effect registry, additional effect categories, renderer modularization, and recording/export are intentionally deferred to later phases.
+
+## Phase 3: O-Shaped Mouth Detection
+
+`FaceAnalyzer` now exposes a separate `mouthShape` alongside the unchanged `mouthState`. `MouthShape` is `NEUTRAL`, `PURSED`, or `O_SHAPE`; it does not add a value to the legacy `OPEN`/`CLOSED` state. `FaceAnalysis` also carries `oShapeScore` for calibration. The shared gesture layer remains the vocabulary boundary, while the analyzer remains responsible for converting landmarks into semantic face measurements.
+
+O-shape detection uses the existing smoothed `mouthOpenRatio` (lip height divided by mouth width) and `mouthWidthRatio` (mouth width divided by face width). It enters when both are strong: open ratio ≥ `0.11` and width ratio ≤ `0.36`. Once active, hysteresis keeps it active while open ratio ≥ `0.085` and width ratio ≤ `0.39`. If those weaker conditions fail, the classifier returns `PURSED` when the existing `mouthPursed` condition is true, otherwise `NEUTRAL`. Thus a geometrically narrow, open mouth may temporarily report both `mouthPursed: true` and `mouthShape: "O_SHAPE"`; the legacy inhale path intentionally remains unchanged.
+
+The deterministic score multiplies two clamped linear terms: `openScore = clamp((mouthOpenRatio − 0.075) / (0.14 − 0.075))` and `widthScore = clamp((0.39 − mouthWidthRatio) / (0.39 − 0.31))`; `oShapeScore = openScore × widthScore`. It is diagnostic/future-effect input only. Debug mode now shows `MOUTH SHAPE` and `O SCORE` beside the existing mouth metrics. No smoke-ring emission, renderer behavior, shader, particle behavior, MediaPipe configuration, or effect is triggered by this feature.

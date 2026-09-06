@@ -1,6 +1,6 @@
 import type { FaceGestureState, HandGestureState, HandState, MouthState } from "./gestures";
 
-export type { HandState, MouthState } from "./gestures";
+export type { HandState, MouthShape, MouthState } from "./gestures";
 
 export type Point3 = { x: number; y: number; z: number };
 

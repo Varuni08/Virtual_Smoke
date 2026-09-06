@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CigaretteState, HandState, MouthState, SmokingState } from "./types";
+import type { CigaretteState, HandState, MouthShape, MouthState, SmokingState } from "./types";
 
 export interface RuntimeDebugState {
   debugMode: boolean;
@@ -8,6 +8,8 @@ export interface RuntimeDebugState {
   handVisible: boolean;
   handState: HandState;
   mouthState: MouthState;
+  mouthShape: MouthShape;
+  oShapeScore: number;
   cigaretteState: CigaretteState;
   smokingState: SmokingState;
   mouthOpenRatio: number;
@@ -47,6 +49,8 @@ export const useInteractionStore = create<RuntimeDebugState>((set) => ({
   handVisible: false,
   handState: "NONE",
   mouthState: "CLOSED",
+  mouthShape: "NEUTRAL",
+  oShapeScore: 0,
   cigaretteState: "IDLE",
   smokingState: "IDLE",
   mouthOpenRatio: 0,

@@ -28,10 +28,12 @@ export function DebugOverlay() {
         <dt>FACE / HAND</dt><dd>{state.faceVisible ? "ON" : "LOST"} / {state.handVisible ? "ON" : "LOST"}</dd>
         <dt>HAND STATE</dt><dd>{state.handState}</dd>
         <dt>MOUTH STATE</dt><dd>{state.mouthState}</dd>
+        <dt>MOUTH SHAPE</dt><dd>{state.mouthShape}</dd>
         <dt>CIGARETTE</dt><dd>{state.cigaretteState}</dd>
         <dt>SMOKING</dt><dd>{state.smokingState}</dd>
         <dt>MOUTH OPEN</dt><dd>{metric(state.mouthOpenRatio)}</dd>
         <dt>MOUTH WIDTH</dt><dd>{metric(state.mouthWidthRatio)}</dd>
+        <dt>O SCORE</dt><dd>{metric(state.oShapeScore)}</dd>
         <dt>PUCKER</dt><dd>{state.mouthPursed ? "ON" : "OFF"}</dd>
         <dt>BURN</dt><dd>{Math.round(state.cigaretteBurn * 100)}%</dd>
         <dt>INHALE</dt><dd>{metric(state.inhaleSeconds, 1)}s</dd>
