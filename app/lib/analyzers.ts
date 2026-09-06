@@ -1,5 +1,6 @@
 import { clamp, distance, expSmoothing, lerp, lerpPoint, midpoint, mirrorPoint } from "./math";
-import type { FaceAnalysis, HandAnalysis, MouthState, Point3 } from "./types";
+import type { MouthState } from "./gestures";
+import type { FaceAnalysis, HandAnalysis, Point3 } from "./types";
 
 const FACE = {
   forehead: 10,

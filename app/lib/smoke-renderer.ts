@@ -1,6 +1,7 @@
 import * as THREE from "three";
+import type { SmokeEmission } from "./effects";
 import { useInteractionStore } from "./store";
-import type { FaceAnalysis, InteractionSnapshot, Point3, SmokeEmission } from "./types";
+import type { FaceAnalysis, InteractionSnapshot, Point3 } from "./types";
 
 const MAX_PARTICLES = 8000;
 const SMOKE_VOLUME_MULTIPLIER = 5;

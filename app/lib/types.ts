@@ -1,6 +1,8 @@
-export type Point3 = { x: number; y: number; z: number };
+import type { FaceGestureState, HandGestureState, HandState, MouthState } from "./gestures";
 
-export type MouthState = "CLOSED" | "OPEN";
+export type { HandState, MouthState } from "./gestures";
+
+export type Point3 = { x: number; y: number; z: number };
 
 export type CigaretteState =
   | "IDLE"
@@ -21,9 +23,7 @@ export type SmokingState =
   | "NOSE_BURST"
   | "CIGARETTE_FALLING";
 
-export type HandState = "NONE" | "PINCH" | "INDEX_MIDDLE_HOLD";
-
-export interface FaceAnalysis {
+export interface FaceAnalysis extends FaceGestureState {
   visible: boolean;
   inGracePeriod: boolean;
   landmarks: Point3[];
@@ -46,7 +46,7 @@ export interface FaceAnalysis {
   roll: number;
 }
 
-export interface HandAnalysis {
+export interface HandAnalysis extends HandGestureState {
   id: string;
   visible: boolean;
   landmarks: Point3[];
@@ -90,18 +90,3 @@ export interface InteractionSnapshot {
   handVisible: boolean;
   delegate: "GPU" | "CPU";
 }
-
-export type SmokeEmission =
-  | {
-      type: "MOUTH_BURST";
-      origin: Point3;
-      direction: Point3;
-      strength: number;
-    }
-  | {
-      type: "NOSE_BURST";
-      origin: Point3;
-      secondaryOrigin: Point3;
-      direction: Point3;
-      strength: number;
-    };

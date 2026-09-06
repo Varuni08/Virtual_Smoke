@@ -607,3 +607,14 @@ The migration should be incremental: first extract interfaces and tests around c
 - `package-lock.json`: dependency graph and reproducibility boundary. It had a pre-existing local modification at audit start and was intentionally left untouched by this audit.
 
 Before changing any of these files, capture baseline camera behavior on supported browsers, run the build/test/lint commands, exercise GPU and CPU fallback where practical, and compare interaction timing and visuals rather than relying only on compilation.
+
+## Phase 2 Architectural Preparation
+
+Phase 2 adds two type-only architectural boundaries without changing landmark calculations, gesture detection, state-machine behavior, rendering, or scheduling:
+
+- `app/lib/gestures.ts` owns the shared vocabulary for the existing mouth states, hand states, face/hand gesture contracts, and a lightweight `GestureSnapshot` shape. `FaceAnalysis` and `HandAnalysis` extend those contracts while preserving their existing return objects.
+- `app/lib/effects.ts` owns the current smoke effect category and the discriminated `MOUTH_BURST`/`NOSE_BURST` emission types, including origin, optional type-specific secondary origin, direction, and strength.
+
+Gesture state now flows conceptually from raw MediaPipe landmarks through `FaceAnalyzer`/`HandAnalyzer`, into shared gesture contracts consumed by `InteractionEngine`. The engine emits typed smoke-category commands to `SmokeRenderer`. The renderer's emitter selection, particle implementation, shaders, and visual behavior remain unchanged.
+
+The analyzers still perform gesture classification alongside geometric analysis, and the interaction engine and renderer remain cigarette/smoke-specific. Separate recognizers, pure state reducers, an effect registry, additional effect categories, renderer modularization, and recording/export are intentionally deferred to later phases.

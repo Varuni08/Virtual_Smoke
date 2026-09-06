@@ -1,6 +1,7 @@
+import type { SmokeEmission } from "./effects";
 import { addScaled, clamp, distance, expSmoothing, lerp, lerpPoint, normalize } from "./math";
 import { useInteractionStore } from "./store";
-import type { CigaretteState, FaceAnalysis, HandAnalysis, InteractionSnapshot, Point3, SmokeEmission } from "./types";
+import type { CigaretteState, FaceAnalysis, HandAnalysis, InteractionSnapshot, Point3 } from "./types";
 
 const INITIAL_POSITION: Point3 = { x: 0.5, y: 0.7, z: 0 };
 const CIGARETTE_FACE_SCALE = 0.275;
@@ -240,6 +241,7 @@ export class InteractionEngine {
 
   private emitMouthBurst(face: FaceAnalysis, now: number) {
     this.emit({
+      category: "SMOKE",
       type: "MOUTH_BURST",
       origin: face.mouthCenter,
       direction: normalize({ x: Math.sin(face.yaw * Math.PI / 180) * 0.4, y: -0.25, z: 1 }),
@@ -253,6 +255,7 @@ export class InteractionEngine {
 
   private emitNoseBurst(face: FaceAnalysis, now: number) {
     this.emit({
+      category: "SMOKE",
       type: "NOSE_BURST",
       origin: face.noseLeft,
       secondaryOrigin: face.noseRight,
