@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { DebugOverlay, drawTrackingDebug } from "./debug-overlay";
 import { FaceAnalyzer, HandAnalyzer } from "./lib/analyzers";
 import { InteractionEngine } from "./lib/interaction-engine";
+import { clamp } from "./lib/math";
 import { SmokeRenderer } from "./lib/smoke-renderer";
 import { useInteractionStore } from "./lib/store";
 import type { FaceAnalysis, HandAnalysis, TrackingFrame } from "./lib/types";
@@ -154,11 +155,19 @@ export function SmokingExperience() {
       const debugMode = useInteractionStore.getState().debugMode;
       if (debugMode) {
         const hand = hands[0];
+        const cigaretteHeld = snapshot.cigaretteState === "HAND_HELD" || snapshot.cigaretteState === "FINGER_HELD";
+        const pinchEnabled = Boolean(hand?.visible && hand.state === "PINCH" && !cigaretteHeld);
+        const pinchPoint = hand?.pinchPoint;
         useInteractionStore.getState().updateRuntime({
           handSpeed: hand?.speed ?? 0,
           handVelocityX: hand?.velocity.x ?? 0,
           handVelocityY: hand?.velocity.y ?? 0,
           handForceActive: Boolean(hand?.visible && hand.speed > 0.01),
+          pinchActive: pinchEnabled,
+          pinchX: pinchPoint?.x ?? 0,
+          pinchY: pinchPoint?.y ?? 0,
+          grabStrength: pinchEnabled ? clamp((0.29 - (hand?.pinchDistance ?? 0)) / 0.19) : 0,
+          grabRadius: pinchEnabled && hand ? clamp(hand.palmSize * 1.1, 0.1, 0.16) : 0,
         });
         drawTrackingDebug(
           debugCanvas,

@@ -211,12 +211,13 @@ export class HandAnalyzer {
       this.previous.set(id, { position: palmCenter, velocity });
       const palmSize = Math.max(0.001, distance(wrist, middleMcp), distance(indexMcp, pinkyMcp));
       const pinchDistance = distance(thumbTip, indexTip) / palmSize;
+      const pinchPoint = midpoint(thumbTip, indexTip);
       const indexExtended = distance(indexTip, wrist) > distance(mirroredAt(HAND.indexPip), wrist) * 1.12;
       const middleExtended = distance(middleTip, wrist) > distance(mirroredAt(HAND.middlePip), wrist) * 1.1;
       const fingerSeparation = distance(indexTip, middleTip) / palmSize;
       const fingerHold = indexExtended && middleExtended && fingerSeparation > 0.12 && fingerSeparation < 0.52;
       const state = pinchDistance < 0.29 ? "PINCH" : fingerHold ? "INDEX_MIDDLE_HOLD" : "NONE";
-      const gripPoint = state === "INDEX_MIDDLE_HOLD" ? midpoint(indexTip, middleTip) : midpoint(thumbTip, indexTip);
+      const gripPoint = state === "INDEX_MIDDLE_HOLD" ? midpoint(indexTip, middleTip) : pinchPoint;
       return {
         id,
         visible: true,
@@ -225,6 +226,7 @@ export class HandAnalyzer {
         previousPalmCenter,
         velocity,
         speed,
+        pinchPoint,
         state,
         pinchDistance,
         palmSize,

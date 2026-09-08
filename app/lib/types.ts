@@ -54,6 +54,7 @@ export interface HandAnalysis extends HandGestureState {
   previousPalmCenter: Point3;
   velocity: Point3;
   speed: number;
+  pinchPoint: Point3;
   state: HandState;
   pinchDistance: number;
   palmSize: number;

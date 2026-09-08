@@ -15,6 +15,10 @@ const vertexShader = `
   uniform float uHandSpeed;
   uniform float uHandInfluenceRadius;
   uniform float uHandActive;
+  uniform vec2 uPinchPosition;
+  uniform float uPinchActive;
+  uniform float uPinchStrength;
+  uniform float uPinchRadius;
   attribute vec3 aStart;
   attribute vec3 aVelocity;
   attribute float aSpawnTime;
@@ -63,7 +67,23 @@ const vertexShader = `
     vec2 handTangent = vec2(-handOffset.y, handOffset.x) / max(handDistance, 0.001);
     vec2 handDisplacement = (handDirection * handSpeed * handAge * 0.22
       + handTangent * handSpeed * handAge * 0.045) * fastBoost;
-    position.xy += uHandActive * handFalloff * mix(1.0, 0.72, ringSmoke) * handDisplacement;
+    vec2 pinchOffset = position.xy - uPinchPosition;
+    float pinchDistance = length(pinchOffset);
+    float pinchFalloff = 1.0 - smoothstep(uPinchRadius * 0.16, uPinchRadius, pinchDistance);
+    float pinchGather = uPinchActive * uPinchStrength * pinchFalloff;
+    position.xy += uHandActive * handFalloff * mix(1.0, 0.72, ringSmoke)
+      * mix(1.0, 0.32, pinchGather) * handDisplacement;
+
+    vec2 attractionOffset = position.xy - uPinchPosition;
+    float attractionDistance = length(attractionOffset);
+    float attractionFalloff = 1.0 - smoothstep(uPinchRadius * 0.16, uPinchRadius, attractionDistance);
+    float pinchAge = min(max(age, 0.0), 0.34);
+    float attraction = uPinchActive * uPinchStrength * attractionFalloff * pinchAge * 0.9;
+    vec2 attractionDirection = attractionOffset / max(attractionDistance, 0.001);
+    vec2 attractionTangent = vec2(-attractionDirection.y, attractionDirection.x);
+    float ringProtection = mix(1.0, 0.76, ringSmoke);
+    position.xy -= attractionDirection * attractionDistance * attraction * ringProtection;
+    position.xy += attractionTangent * attraction * 0.018 * ringProtection;
 
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mvPosition;
@@ -200,6 +220,12 @@ export class SmokeRenderer {
   private handInfluenceRadius = 0.18;
   private handActive = 0;
   private handMissingSeconds = 0;
+  private pinchPosition = new THREE.Vector2();
+  private pinchTargetPosition = new THREE.Vector2();
+  private pinchStrength = 0;
+  private pinchRadius = 0.13;
+  private pinchActive = 0;
+  private pinchMissingSeconds = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -264,6 +290,10 @@ export class SmokeRenderer {
         uHandSpeed: { value: this.handSpeed },
         uHandInfluenceRadius: { value: this.handInfluenceRadius },
         uHandActive: { value: this.handActive },
+        uPinchPosition: { value: this.pinchPosition },
+        uPinchActive: { value: this.pinchActive },
+        uPinchStrength: { value: this.pinchStrength },
+        uPinchRadius: { value: this.pinchRadius },
       },
       transparent: true,
       depthWrite: false,
@@ -394,6 +424,7 @@ export class SmokeRenderer {
     this.particleMaterial.uniforms.uTime.value = time;
     this.updatePerformanceQuality(fps, dt);
     this.updateHandInfluence(hand, dt);
+    this.updatePinchInfluence(snapshot, hand, dt);
 
     const mapped = this.mapPoint(snapshot.cigarettePosition);
     const mappedLength = this.mapLength(snapshot.cigaretteLength);
@@ -669,6 +700,30 @@ export class SmokeRenderer {
     this.particleMaterial.uniforms.uHandSpeed.value = this.handSpeed;
     this.particleMaterial.uniforms.uHandInfluenceRadius.value = this.handInfluenceRadius;
     this.particleMaterial.uniforms.uHandActive.value = this.handActive;
+  }
+
+  private updatePinchInfluence(snapshot: InteractionSnapshot, hand: HandAnalysis | undefined, dt: number) {
+    const cigaretteHeld = snapshot.cigaretteState === "HAND_HELD" || snapshot.cigaretteState === "FINGER_HELD";
+    const pinchAllowed = Boolean(hand?.visible && hand.state === "PINCH" && !cigaretteHeld);
+    if (pinchAllowed && hand) {
+      const targetPosition = this.mapPoint(hand.pinchPoint);
+      this.pinchTargetPosition.set(targetPosition.x, targetPosition.y);
+      this.pinchPosition.lerp(this.pinchTargetPosition, expSmoothing(dt, 20));
+      const targetStrength = clamp((0.29 - hand.pinchDistance) / 0.19, 0, 1);
+      this.pinchStrength = lerp(this.pinchStrength, targetStrength, expSmoothing(dt, 22));
+      this.pinchRadius = lerp(this.pinchRadius, clamp(hand.palmSize * 1.1, 0.1, 0.16), expSmoothing(dt, 18));
+      this.pinchActive = lerp(this.pinchActive, 1, expSmoothing(dt, 24));
+      this.pinchMissingSeconds = 0;
+    } else {
+      this.pinchMissingSeconds += dt;
+      const decay = Math.exp(-dt * (this.pinchMissingSeconds > 0.08 ? 20 : 14));
+      this.pinchStrength *= decay;
+      this.pinchActive *= decay;
+    }
+    this.particleMaterial.uniforms.uPinchPosition.value = this.pinchPosition;
+    this.particleMaterial.uniforms.uPinchActive.value = this.pinchActive;
+    this.particleMaterial.uniforms.uPinchStrength.value = this.pinchStrength;
+    this.particleMaterial.uniforms.uPinchRadius.value = this.pinchRadius;
   }
 
   private qualityFactor() {
