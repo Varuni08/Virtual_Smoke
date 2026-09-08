@@ -27,6 +27,9 @@ export function DebugOverlay() {
         <dt>HAND / FACE AI</dt><dd>{metric(state.handInferenceMs, 1)} / {metric(state.faceInferenceMs, 1)}ms</dd>
         <dt>FACE / HAND</dt><dd>{state.faceVisible ? "ON" : "LOST"} / {state.handVisible ? "ON" : "LOST"}</dd>
         <dt>HAND STATE</dt><dd>{state.handState}</dd>
+        <dt>HAND SPEED</dt><dd>{metric(state.handSpeed)}</dd>
+        <dt>HAND VELOCITY</dt><dd>{metric(state.handVelocityX)} / {metric(state.handVelocityY)}</dd>
+        <dt>FORCE FIELD</dt><dd>{state.handForceActive ? "ACTIVE" : "IDLE"}</dd>
         <dt>MOUTH STATE</dt><dd>{state.mouthState}</dd>
         <dt>MOUTH SHAPE</dt><dd>{state.mouthShape}</dd>
         <dt>CIGARETTE</dt><dd>{state.cigaretteState}</dd>

@@ -170,7 +170,15 @@ export class FaceAnalyzer {
 }
 
 export class HandAnalyzer {
-  analyze(rawHands: Point3[][], handedness: string[], includeDebugLandmarks = false): HandAnalysis[] {
+  private previous = new Map<string, { position: Point3; velocity: Point3 }>();
+
+  analyze(rawHands: Point3[][], handedness: string[], includeDebugLandmarks = false, dt = 1 / 60): HandAnalysis[] {
+    if (rawHands.length === 0) {
+      this.previous.clear();
+      return [];
+    }
+
+    const deltaTime = Math.max(0.001, dt);
     return rawHands.map((raw, index) => {
       const mirroredAt = (landmarkIndex: number) => mirrorPoint(pointAt(raw, landmarkIndex));
       const landmarks = includeDebugLandmarks ? raw.map(mirrorPoint) : [];
@@ -181,7 +189,27 @@ export class HandAnalyzer {
       const middleTip = mirroredAt(HAND.middleTip);
       const indexMcp = mirroredAt(HAND.indexMcp);
       const middleMcp = mirroredAt(HAND.middleMcp);
-      const palmSize = Math.max(0.001, distance(wrist, middleMcp), distance(indexMcp, mirroredAt(HAND.pinkyMcp)));
+      const pinkyMcp = mirroredAt(HAND.pinkyMcp);
+      const palmCenter = {
+        x: (wrist.x + indexMcp.x + middleMcp.x + pinkyMcp.x) * 0.25,
+        y: (wrist.y + indexMcp.y + middleMcp.y + pinkyMcp.y) * 0.25,
+        z: (wrist.z + indexMcp.z + middleMcp.z + pinkyMcp.z) * 0.25,
+      };
+      const previous = this.previous.get(id);
+      const previousPalmCenter = previous?.position ?? palmCenter;
+      const rawVelocity = previous
+        ? {
+          x: (palmCenter.x - previous.position.x) / deltaTime,
+          y: (palmCenter.y - previous.position.y) / deltaTime,
+          z: (palmCenter.z - previous.position.z) / deltaTime,
+        }
+        : { x: 0, y: 0, z: 0 };
+      const velocity = previous
+        ? lerpPoint(previous.velocity, rawVelocity, expSmoothing(deltaTime, 14))
+        : rawVelocity;
+      const speed = Math.min(2, Math.hypot(velocity.x, velocity.y));
+      this.previous.set(id, { position: palmCenter, velocity });
+      const palmSize = Math.max(0.001, distance(wrist, middleMcp), distance(indexMcp, pinkyMcp));
       const pinchDistance = distance(thumbTip, indexTip) / palmSize;
       const indexExtended = distance(indexTip, wrist) > distance(mirroredAt(HAND.indexPip), wrist) * 1.12;
       const middleExtended = distance(middleTip, wrist) > distance(mirroredAt(HAND.middlePip), wrist) * 1.1;
@@ -193,6 +221,10 @@ export class HandAnalyzer {
         id,
         visible: true,
         landmarks,
+        palmCenter,
+        previousPalmCenter,
+        velocity,
+        speed,
         state,
         pinchDistance,
         palmSize,

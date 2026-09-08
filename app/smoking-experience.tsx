@@ -39,6 +39,7 @@ export function SmokingExperience() {
     let appliedHandRevision = 0;
     let appliedFaceRevision = 0;
     let lastFaceTrackingAt = performance.now();
+    let lastHandTrackingAt = performance.now();
     let lastFrameAt = performance.now();
     let fpsWindowAt = lastFrameAt;
     let renderedFrames = 0;
@@ -129,7 +130,9 @@ export function SmokingExperience() {
       if (latestTracking && latestTracking !== appliedTracking) {
         const debugMode = useInteractionStore.getState().debugMode;
         if (latestTracking.handRevision !== appliedHandRevision) {
-          hands = handAnalyzer.analyze(latestTracking.handLandmarks, latestTracking.handedness, debugMode);
+          const handDt = Math.min(0.08, Math.max(0.001, (latestTracking.completedAt - lastHandTrackingAt) / 1000));
+          hands = handAnalyzer.analyze(latestTracking.handLandmarks, latestTracking.handedness, debugMode, handDt);
+          lastHandTrackingAt = latestTracking.completedAt;
           appliedHandRevision = latestTracking.handRevision;
           if (latestTracking.handInferenceMs > 0) handInferenceMs = latestTracking.handInferenceMs;
         }
@@ -145,11 +148,18 @@ export function SmokingExperience() {
       }
 
       const snapshot = engine.update(face, hands, now, dt, delegate);
-      visual.update(snapshot, face, now, dt, fps);
+      visual.update(snapshot, face, now, dt, fps, hands[0]);
       if (appliedThisFrame) inputLatencyMs = Math.max(0, performance.now() - appliedThisFrame.sourceTimestamp);
 
       const debugMode = useInteractionStore.getState().debugMode;
       if (debugMode) {
+        const hand = hands[0];
+        useInteractionStore.getState().updateRuntime({
+          handSpeed: hand?.speed ?? 0,
+          handVelocityX: hand?.velocity.x ?? 0,
+          handVelocityY: hand?.velocity.y ?? 0,
+          handForceActive: Boolean(hand?.visible && hand.speed > 0.01),
+        });
         drawTrackingDebug(
           debugCanvas,
           face,

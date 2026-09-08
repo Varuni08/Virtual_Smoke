@@ -8,6 +8,10 @@ export interface RuntimeDebugState {
   faceVisible: boolean;
   handVisible: boolean;
   handState: HandState;
+  handSpeed: number;
+  handVelocityX: number;
+  handVelocityY: number;
+  handForceActive: boolean;
   mouthState: MouthState;
   mouthShape: MouthShape;
   oShapeScore: number;
@@ -51,6 +55,10 @@ export const useInteractionStore = create<RuntimeDebugState>((set) => ({
   faceVisible: false,
   handVisible: false,
   handState: "NONE",
+  handSpeed: 0,
+  handVelocityX: 0,
+  handVelocityY: 0,
+  handForceActive: false,
   mouthState: "CLOSED",
   mouthShape: "NEUTRAL",
   oShapeScore: 0,

@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import type { SmokeEmission } from "./effects";
+import { clamp, expSmoothing, lerp } from "./math";
 import { useInteractionStore } from "./store";
-import type { FaceAnalysis, InteractionSnapshot, Point3 } from "./types";
+import type { FaceAnalysis, HandAnalysis, InteractionSnapshot, Point3 } from "./types";
 
 const MAX_PARTICLES = 8000;
 const SMOKE_VOLUME_MULTIPLIER = 5;
@@ -9,6 +10,11 @@ const SMOKE_VOLUME_MULTIPLIER = 5;
 const vertexShader = `
   uniform float uTime;
   uniform float uPixelRatio;
+  uniform vec2 uHandPosition;
+  uniform vec2 uHandVelocity;
+  uniform float uHandSpeed;
+  uniform float uHandInfluenceRadius;
+  uniform float uHandActive;
   attribute vec3 aStart;
   attribute vec3 aVelocity;
   attribute float aSpawnTime;
@@ -44,6 +50,20 @@ const vertexShader = `
     position.y += ringSmoke * cos(age * (1.7 + aSeed * 1.6) + aSeed * 5.0) * age * age
       * (0.00015 + ringTurbulence * (0.0035 + ringWake * ringPeel * 0.0015));
     position.y -= ringSmoke * age * age * (0.0012 + ringWake * ringPeel * 0.0008);
+
+    vec2 handOffset = position.xy - uHandPosition;
+    float handDistance = length(handOffset);
+    float handFalloff = 1.0 - smoothstep(uHandInfluenceRadius * 0.16, uHandInfluenceRadius, handDistance);
+    float handAge = min(max(age, 0.0), 0.32);
+    float handSpeed = clamp(uHandSpeed, 0.0, 1.2);
+    float normalizedSpeed = clamp(handSpeed / 1.2, 0.0, 1.0);
+    float fastSwipe = smoothstep(0.55, 1.0, normalizedSpeed);
+    float fastBoost = 1.0 + fastSwipe * 0.8;
+    vec2 handDirection = normalize(uHandVelocity + vec2(0.00001));
+    vec2 handTangent = vec2(-handOffset.y, handOffset.x) / max(handDistance, 0.001);
+    vec2 handDisplacement = (handDirection * handSpeed * handAge * 0.22
+      + handTangent * handSpeed * handAge * 0.045) * fastBoost;
+    position.xy += uHandActive * handFalloff * mix(1.0, 0.72, ringSmoke) * handDisplacement;
 
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mvPosition;
@@ -172,6 +192,14 @@ export class SmokeRenderer {
   private mouthParticleCount = 0;
   private baseSmokeParticleCount = 0;
   private lastParticleDebugUpdate = 0;
+  private handPosition = new THREE.Vector2();
+  private handVelocity = new THREE.Vector2();
+  private handTargetPosition = new THREE.Vector2();
+  private handTargetVelocity = new THREE.Vector2();
+  private handSpeed = 0;
+  private handInfluenceRadius = 0.18;
+  private handActive = 0;
+  private handMissingSeconds = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -231,6 +259,11 @@ export class SmokeRenderer {
       uniforms: {
         uTime: { value: 0 },
         uPixelRatio: { value: this.renderer.getPixelRatio() },
+        uHandPosition: { value: this.handPosition },
+        uHandVelocity: { value: this.handVelocity },
+        uHandSpeed: { value: this.handSpeed },
+        uHandInfluenceRadius: { value: this.handInfluenceRadius },
+        uHandActive: { value: this.handActive },
       },
       transparent: true,
       depthWrite: false,
@@ -356,10 +389,11 @@ export class SmokeRenderer {
     }
   }
 
-  update(snapshot: InteractionSnapshot, face: FaceAnalysis, now: number, dt: number, fps: number) {
+  update(snapshot: InteractionSnapshot, face: FaceAnalysis, now: number, dt: number, fps: number, hand?: HandAnalysis) {
     const time = now / 1000;
     this.particleMaterial.uniforms.uTime.value = time;
     this.updatePerformanceQuality(fps, dt);
+    this.updateHandInfluence(hand, dt);
 
     const mapped = this.mapPoint(snapshot.cigarettePosition);
     const mappedLength = this.mapLength(snapshot.cigaretteLength);
@@ -596,6 +630,45 @@ export class SmokeRenderer {
 
   private mapLength(length: number) {
     return length * this.displayedWidth / this.width;
+  }
+
+  private mapVector(vector: Point3): Point3 {
+    return {
+      x: vector.x * this.displayedWidth / this.width,
+      y: vector.y * this.displayedHeight / this.height,
+      z: vector.z,
+    };
+  }
+
+  private updateHandInfluence(hand: HandAnalysis | undefined, dt: number) {
+    const smoothing = expSmoothing(dt, 16);
+    if (hand?.visible) {
+      const targetPosition = this.mapPoint(hand.palmCenter);
+      const targetVelocity = this.mapVector(hand.velocity);
+      this.handTargetPosition.set(targetPosition.x, targetPosition.y);
+      this.handTargetVelocity.set(targetVelocity.x, targetVelocity.y);
+      this.handPosition.lerp(this.handTargetPosition, smoothing);
+      this.handVelocity.lerp(this.handTargetVelocity, expSmoothing(dt, 12));
+      this.handSpeed = lerp(this.handSpeed, Math.min(1.2, hand.speed), expSmoothing(dt, 14));
+      this.handInfluenceRadius = lerp(
+        this.handInfluenceRadius,
+        clamp(hand.palmSize * 1.8, 0.14, 0.24),
+        smoothing,
+      );
+      this.handActive = lerp(this.handActive, 1, expSmoothing(dt, 24));
+      this.handMissingSeconds = 0;
+    } else {
+      this.handMissingSeconds += dt;
+      const decay = Math.exp(-dt * (this.handMissingSeconds > 0.12 ? 18 : 10));
+      this.handVelocity.multiplyScalar(decay);
+      this.handSpeed *= decay;
+      this.handActive *= decay;
+    }
+    this.particleMaterial.uniforms.uHandPosition.value = this.handPosition;
+    this.particleMaterial.uniforms.uHandVelocity.value = this.handVelocity;
+    this.particleMaterial.uniforms.uHandSpeed.value = this.handSpeed;
+    this.particleMaterial.uniforms.uHandInfluenceRadius.value = this.handInfluenceRadius;
+    this.particleMaterial.uniforms.uHandActive.value = this.handActive;
   }
 
   private qualityFactor() {
