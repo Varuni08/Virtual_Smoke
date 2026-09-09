@@ -172,9 +172,13 @@ export class FaceAnalyzer {
 export class HandAnalyzer {
   private previous = new Map<string, { position: Point3; velocity: Point3 }>();
 
+  reset() {
+    this.previous.clear();
+  }
+
   analyze(rawHands: Point3[][], handedness: string[], includeDebugLandmarks = false, dt = 1 / 60): HandAnalysis[] {
     if (rawHands.length === 0) {
-      this.previous.clear();
+      this.reset();
       return [];
     }
 

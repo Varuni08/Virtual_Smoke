@@ -6,6 +6,10 @@ import type { FaceAnalysis, HandAnalysis, InteractionSnapshot, Point3 } from "./
 
 const MAX_PARTICLES = 8000;
 const SMOKE_VOLUME_MULTIPLIER = 5;
+export const HAND_GRACE_MS = 80;
+export const HAND_STALE_MS = 160;
+const MIN_THROW_SPEED = 0.28;
+const THROW_FULL_SPEED = 1.05;
 
 const vertexShader = `
   uniform float uTime;
@@ -19,6 +23,11 @@ const vertexShader = `
   uniform float uPinchActive;
   uniform float uPinchStrength;
   uniform float uPinchRadius;
+  uniform vec2 uThrowPosition;
+  uniform vec2 uThrowVelocity;
+  uniform float uThrowStrength;
+  uniform float uThrowRadius;
+  uniform float uThrowAge;
   attribute vec3 aStart;
   attribute vec3 aVelocity;
   attribute float aSpawnTime;
@@ -84,6 +93,20 @@ const vertexShader = `
     float ringProtection = mix(1.0, 0.76, ringSmoke);
     position.xy -= attractionDirection * attractionDistance * attraction * ringProtection;
     position.xy += attractionTangent * attraction * 0.018 * ringProtection;
+
+    float throwDistance = length(position.xy - uThrowPosition);
+    float throwFalloff = 1.0 - smoothstep(uThrowRadius * 0.16, uThrowRadius, throwDistance);
+    float throwDecay = exp(-uThrowAge * 4.4);
+    float throwWindow = step(0.0, uThrowAge) * (1.0 - step(1.05, uThrowAge));
+    float throwImpulse = uThrowStrength * throwFalloff * throwDecay * throwWindow;
+    float throwRingProtection = mix(1.0, 0.76, ringSmoke);
+    position.xy += uThrowVelocity * min(uThrowAge, 0.78) * 0.23 * throwImpulse * throwRingProtection;
+    float throwBreakup = smoothstep(0.2, 0.72, uThrowAge) * throwFalloff * throwDecay;
+    vec2 throwTurbulence = vec2(
+      sin(aSeed * 31.0 + uThrowAge * 7.0),
+      cos(aSeed * 23.0 - uThrowAge * 5.0)
+    );
+    position.xy += throwTurbulence * throwBreakup * uThrowStrength * 0.006 * throwRingProtection;
 
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mvPosition;
@@ -226,6 +249,15 @@ export class SmokeRenderer {
   private pinchRadius = 0.13;
   private pinchActive = 0;
   private pinchMissingSeconds = 0;
+  private pinchGesturePresent = false;
+  private pinchTrackingInterrupted = false;
+  private pinchHoldSeconds = 0;
+  private pinchGrabEngaged = false;
+  private throwPosition = new THREE.Vector2();
+  private throwVelocity = new THREE.Vector2();
+  private throwStrength = 0;
+  private throwRadius = 0.15;
+  private throwAge = 2;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -294,6 +326,11 @@ export class SmokeRenderer {
         uPinchActive: { value: this.pinchActive },
         uPinchStrength: { value: this.pinchStrength },
         uPinchRadius: { value: this.pinchRadius },
+        uThrowPosition: { value: this.throwPosition },
+        uThrowVelocity: { value: this.throwVelocity },
+        uThrowStrength: { value: this.throwStrength },
+        uThrowRadius: { value: this.throwRadius },
+        uThrowAge: { value: this.throwAge },
       },
       transparent: true,
       depthWrite: false,
@@ -419,12 +456,22 @@ export class SmokeRenderer {
     }
   }
 
-  update(snapshot: InteractionSnapshot, face: FaceAnalysis, now: number, dt: number, fps: number, hand?: HandAnalysis) {
+  update(
+    snapshot: InteractionSnapshot,
+    face: FaceAnalysis,
+    now: number,
+    dt: number,
+    fps: number,
+    hand?: HandAnalysis,
+    handUpdatedAt = 0,
+  ) {
     const time = now / 1000;
     this.particleMaterial.uniforms.uTime.value = time;
     this.updatePerformanceQuality(fps, dt);
-    this.updateHandInfluence(hand, dt);
-    this.updatePinchInfluence(snapshot, hand, dt);
+    const handAgeMs = handUpdatedAt > 0 ? Math.max(0, now - handUpdatedAt) : Number.POSITIVE_INFINITY;
+    this.updateHandInfluence(hand, handAgeMs, dt);
+    this.updatePinchInfluence(snapshot, hand, handAgeMs, dt);
+    this.updateThrowState(dt);
 
     const mapped = this.mapPoint(snapshot.cigarettePosition);
     const mappedLength = this.mapLength(snapshot.cigaretteLength);
@@ -671,9 +718,10 @@ export class SmokeRenderer {
     };
   }
 
-  private updateHandInfluence(hand: HandAnalysis | undefined, dt: number) {
+  private updateHandInfluence(hand: HandAnalysis | undefined, handAgeMs: number, dt: number) {
     const smoothing = expSmoothing(dt, 16);
-    if (hand?.visible) {
+    const handFresh = Boolean(hand?.visible && handAgeMs <= HAND_GRACE_MS);
+    if (handFresh && hand) {
       const targetPosition = this.mapPoint(hand.palmCenter);
       const targetVelocity = this.mapVector(hand.velocity);
       this.handTargetPosition.set(targetPosition.x, targetPosition.y);
@@ -690,10 +738,16 @@ export class SmokeRenderer {
       this.handMissingSeconds = 0;
     } else {
       this.handMissingSeconds += dt;
-      const decay = Math.exp(-dt * (this.handMissingSeconds > 0.12 ? 18 : 10));
+      const decayRate = handAgeMs > HAND_STALE_MS ? 36 : handAgeMs > HAND_GRACE_MS ? 26 : 10;
+      const decay = Math.exp(-dt * decayRate);
       this.handVelocity.multiplyScalar(decay);
       this.handSpeed *= decay;
       this.handActive *= decay;
+      if (handAgeMs > HAND_STALE_MS) {
+        this.handVelocity.set(0, 0);
+        this.handSpeed = 0;
+        this.handActive = 0;
+      }
     }
     this.particleMaterial.uniforms.uHandPosition.value = this.handPosition;
     this.particleMaterial.uniforms.uHandVelocity.value = this.handVelocity;
@@ -702,10 +756,28 @@ export class SmokeRenderer {
     this.particleMaterial.uniforms.uHandActive.value = this.handActive;
   }
 
-  private updatePinchInfluence(snapshot: InteractionSnapshot, hand: HandAnalysis | undefined, dt: number) {
+  private updatePinchInfluence(
+    snapshot: InteractionSnapshot,
+    hand: HandAnalysis | undefined,
+    handAgeMs: number,
+    dt: number,
+  ) {
     const cigaretteHeld = snapshot.cigaretteState === "HAND_HELD" || snapshot.cigaretteState === "FINGER_HELD";
-    const pinchAllowed = Boolean(hand?.visible && hand.state === "PINCH" && !cigaretteHeld);
-    if (pinchAllowed && hand) {
+    const handFresh = Boolean(hand?.visible && handAgeMs <= HAND_GRACE_MS);
+    const pinchGesturePresent = Boolean(handFresh && hand?.state === "PINCH");
+    if (!handFresh) this.pinchTrackingInterrupted = true;
+    const explicitRelease = Boolean(
+      handFresh
+      && !pinchGesturePresent
+      && this.pinchGesturePresent
+      && !this.pinchTrackingInterrupted,
+    );
+    if (explicitRelease && !cigaretteHeld) this.captureThrowRelease();
+    if (handFresh) {
+      this.pinchGesturePresent = pinchGesturePresent;
+      if (pinchGesturePresent) this.pinchTrackingInterrupted = false;
+    }
+    if (handFresh && pinchGesturePresent && !cigaretteHeld && hand) {
       const targetPosition = this.mapPoint(hand.pinchPoint);
       this.pinchTargetPosition.set(targetPosition.x, targetPosition.y);
       this.pinchPosition.lerp(this.pinchTargetPosition, expSmoothing(dt, 20));
@@ -714,16 +786,69 @@ export class SmokeRenderer {
       this.pinchRadius = lerp(this.pinchRadius, clamp(hand.palmSize * 1.1, 0.1, 0.16), expSmoothing(dt, 18));
       this.pinchActive = lerp(this.pinchActive, 1, expSmoothing(dt, 24));
       this.pinchMissingSeconds = 0;
+      this.pinchHoldSeconds += dt;
+      if (this.pinchHoldSeconds >= 0.12 && this.pinchStrength > 0.2) this.pinchGrabEngaged = true;
     } else {
       this.pinchMissingSeconds += dt;
-      const decay = Math.exp(-dt * (this.pinchMissingSeconds > 0.08 ? 20 : 14));
+      const decayRate = handAgeMs > HAND_STALE_MS ? 36 : handAgeMs > HAND_GRACE_MS ? 26 : 14;
+      const decay = Math.exp(-dt * decayRate);
       this.pinchStrength *= decay;
       this.pinchActive *= decay;
+      if (handFresh && pinchGesturePresent && cigaretteHeld) {
+        this.pinchHoldSeconds = 0;
+        this.pinchGrabEngaged = false;
+      }
+      if (handFresh && !pinchGesturePresent) {
+        this.pinchHoldSeconds = 0;
+        this.pinchGrabEngaged = false;
+      }
+      if (handAgeMs > HAND_STALE_MS) {
+        this.pinchGesturePresent = false;
+        this.pinchTrackingInterrupted = false;
+        this.pinchHoldSeconds = 0;
+        this.pinchGrabEngaged = false;
+        this.pinchStrength = 0;
+        this.pinchActive = 0;
+      }
     }
     this.particleMaterial.uniforms.uPinchPosition.value = this.pinchPosition;
     this.particleMaterial.uniforms.uPinchActive.value = this.pinchActive;
     this.particleMaterial.uniforms.uPinchStrength.value = this.pinchStrength;
     this.particleMaterial.uniforms.uPinchRadius.value = this.pinchRadius;
+  }
+
+  private captureThrowRelease() {
+    if (!this.pinchGrabEngaged) return;
+    const speed = Math.min(1.2, this.handSpeed);
+    const minimumSpeed = MIN_THROW_SPEED;
+    if (speed < minimumSpeed) return;
+    const normalizedSpeed = clamp((speed - minimumSpeed) / (THROW_FULL_SPEED - minimumSpeed));
+    const speedCurve = normalizedSpeed * normalizedSpeed * (3 - 2 * normalizedSpeed);
+    this.throwPosition.copy(this.pinchPosition);
+    this.throwVelocity.copy(this.handVelocity);
+    this.throwStrength = speedCurve * 0.82;
+    this.throwRadius = clamp(this.pinchRadius * 1.25, 0.12, 0.2);
+    this.throwAge = 0;
+  }
+
+  private updateThrowState(dt: number) {
+    if (this.throwAge <= 1.05) this.throwAge += dt;
+    if (this.throwAge > 1.05) this.throwStrength = 0;
+    this.particleMaterial.uniforms.uThrowPosition.value = this.throwPosition;
+    this.particleMaterial.uniforms.uThrowVelocity.value = this.throwVelocity;
+    this.particleMaterial.uniforms.uThrowStrength.value = this.throwStrength;
+    this.particleMaterial.uniforms.uThrowRadius.value = this.throwRadius;
+    this.particleMaterial.uniforms.uThrowAge.value = this.throwAge;
+    if (useInteractionStore.getState().debugMode) {
+      useInteractionStore.getState().updateRuntime({
+        throwActive: this.throwStrength > 0,
+        throwSpeed: this.throwVelocity.length(),
+        throwVelocityX: this.throwVelocity.x,
+        throwVelocityY: this.throwVelocity.y,
+        throwStrength: this.throwStrength,
+        throwAge: this.throwAge <= 1.05 ? this.throwAge : 0,
+      });
+    }
   }
 
   private qualityFactor() {

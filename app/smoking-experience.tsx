@@ -5,7 +5,7 @@ import { DebugOverlay, drawTrackingDebug } from "./debug-overlay";
 import { FaceAnalyzer, HandAnalyzer } from "./lib/analyzers";
 import { InteractionEngine } from "./lib/interaction-engine";
 import { clamp } from "./lib/math";
-import { SmokeRenderer } from "./lib/smoke-renderer";
+import { HAND_STALE_MS, SmokeRenderer } from "./lib/smoke-renderer";
 import { useInteractionStore } from "./lib/store";
 import type { FaceAnalysis, HandAnalysis, TrackingFrame } from "./lib/types";
 import { VisionTracker } from "./lib/vision-tracker";
@@ -131,7 +131,9 @@ export function SmokingExperience() {
       if (latestTracking && latestTracking !== appliedTracking) {
         const debugMode = useInteractionStore.getState().debugMode;
         if (latestTracking.handRevision !== appliedHandRevision) {
-          const handDt = Math.min(0.08, Math.max(0.001, (latestTracking.completedAt - lastHandTrackingAt) / 1000));
+          const handGapMs = latestTracking.completedAt - lastHandTrackingAt;
+          if (handGapMs > HAND_STALE_MS) handAnalyzer.reset();
+          const handDt = Math.min(0.08, Math.max(0.001, handGapMs / 1000));
           hands = handAnalyzer.analyze(latestTracking.handLandmarks, latestTracking.handedness, debugMode, handDt);
           lastHandTrackingAt = latestTracking.completedAt;
           appliedHandRevision = latestTracking.handRevision;
@@ -149,20 +151,24 @@ export function SmokingExperience() {
       }
 
       const snapshot = engine.update(face, hands, now, dt, delegate);
-      visual.update(snapshot, face, now, dt, fps, hands[0]);
+      visual.update(snapshot, face, now, dt, fps, hands[0], lastHandTrackingAt);
       if (appliedThisFrame) inputLatencyMs = Math.max(0, performance.now() - appliedThisFrame.sourceTimestamp);
 
       const debugMode = useInteractionStore.getState().debugMode;
       if (debugMode) {
         const hand = hands[0];
+        const handAgeMs = Math.max(0, now - lastHandTrackingAt);
         const cigaretteHeld = snapshot.cigaretteState === "HAND_HELD" || snapshot.cigaretteState === "FINGER_HELD";
-        const pinchEnabled = Boolean(hand?.visible && hand.state === "PINCH" && !cigaretteHeld);
+        const handWithinStaleTimeout = Boolean(hand?.visible && handAgeMs <= HAND_STALE_MS);
+        const pinchEnabled = Boolean(handWithinStaleTimeout && hand?.state === "PINCH" && !cigaretteHeld);
         const pinchPoint = hand?.pinchPoint;
         useInteractionStore.getState().updateRuntime({
           handSpeed: hand?.speed ?? 0,
           handVelocityX: hand?.velocity.x ?? 0,
           handVelocityY: hand?.velocity.y ?? 0,
-          handForceActive: Boolean(hand?.visible && hand.speed > 0.01),
+          handForceActive: Boolean(hand?.visible && handAgeMs <= HAND_STALE_MS && hand.speed > 0.01),
+          handAgeMs,
+          handFresh: Boolean(hand?.visible && handAgeMs <= HAND_STALE_MS),
           pinchActive: pinchEnabled,
           pinchX: pinchPoint?.x ?? 0,
           pinchY: pinchPoint?.y ?? 0,

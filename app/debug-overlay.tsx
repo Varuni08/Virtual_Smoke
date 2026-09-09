@@ -30,10 +30,17 @@ export function DebugOverlay() {
         <dt>HAND SPEED</dt><dd>{metric(state.handSpeed)}</dd>
         <dt>HAND VELOCITY</dt><dd>{metric(state.handVelocityX)} / {metric(state.handVelocityY)}</dd>
         <dt>FORCE FIELD</dt><dd>{state.handForceActive ? "ACTIVE" : "IDLE"}</dd>
+        <dt>HAND AGE</dt><dd>{metric(state.handAgeMs, 0)}ms</dd>
+        <dt>HAND FRESH</dt><dd>{state.handFresh ? "YES" : "STALE"}</dd>
         <dt>PINCH ACTIVE</dt><dd>{state.pinchActive ? "ON" : "OFF"}</dd>
         <dt>PINCH X / Y</dt><dd>{metric(state.pinchX)} / {metric(state.pinchY)}</dd>
         <dt>GRAB STRENGTH</dt><dd>{metric(state.grabStrength)}</dd>
         <dt>GRAB RADIUS</dt><dd>{metric(state.grabRadius)}</dd>
+        <dt>THROW</dt><dd>{state.throwActive ? "ACTIVE" : "IDLE"}</dd>
+        <dt>THROW SPEED</dt><dd>{metric(state.throwSpeed)}</dd>
+        <dt>THROW VELOCITY</dt><dd>{metric(state.throwVelocityX)} / {metric(state.throwVelocityY)}</dd>
+        <dt>THROW STRENGTH</dt><dd>{metric(state.throwStrength)}</dd>
+        <dt>THROW AGE</dt><dd>{metric(state.throwAge, 3)}s</dd>
         <dt>MOUTH STATE</dt><dd>{state.mouthState}</dd>
         <dt>MOUTH SHAPE</dt><dd>{state.mouthShape}</dd>
         <dt>CIGARETTE</dt><dd>{state.cigaretteState}</dd>
