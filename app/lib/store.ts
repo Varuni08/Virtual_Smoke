@@ -25,6 +25,17 @@ export interface RuntimeDebugState {
   throwVelocityY: number;
   throwStrength: number;
   throwAge: number;
+  lighterActive: boolean;
+  peaceSign: boolean;
+  indexExtended: boolean;
+  middleExtended: boolean;
+  ringFolded: boolean;
+  pinkyFolded: boolean;
+  indexMiddleSeparation: number;
+  flameX: number;
+  flameY: number;
+  cigaretteLit: boolean;
+  ignitionProximitySeconds: number;
   mouthState: MouthState;
   mouthShape: MouthShape;
   oShapeScore: number;
@@ -85,6 +96,17 @@ export const useInteractionStore = create<RuntimeDebugState>((set) => ({
   throwVelocityY: 0,
   throwStrength: 0,
   throwAge: 0,
+  lighterActive: false,
+  peaceSign: false,
+  indexExtended: false,
+  middleExtended: false,
+  ringFolded: false,
+  pinkyFolded: false,
+  indexMiddleSeparation: 0,
+  flameX: 0,
+  flameY: 0,
+  cigaretteLit: false,
+  ignitionProximitySeconds: 0,
   mouthState: "CLOSED",
   mouthShape: "NEUTRAL",
   oShapeScore: 0,

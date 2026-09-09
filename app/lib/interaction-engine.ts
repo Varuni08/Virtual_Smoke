@@ -15,6 +15,9 @@ const NOSE_EXHALE_DELAY_MS = 3000;
 const EFFECT_LABEL_MS = 900;
 const RING_MIN_OPEN_RATIO = 0.14;
 const RING_HOLD_MS = 100;
+const LIGHTER_HOLD_SECONDS = 0.1;
+const IGNITION_RADIUS = 0.04;
+const IGNITION_HOLD_SECONDS = 0.18;
 
 function isMouthState(state: CigaretteState) {
   return state === "MOUTH_LEFT" || state === "MOUTH_CENTER" || state === "MOUTH_RIGHT";
@@ -31,6 +34,7 @@ export class InteractionEngine {
     cigaretteBaseLength: 0.07,
     cigaretteLength: 0.07,
     cigaretteBurn: 0,
+    cigaretteLit: false,
     cigaretteMouthSide: null,
     inhaleSeconds: 0,
     smokeReady: false,
@@ -38,6 +42,17 @@ export class InteractionEngine {
     faceVisible: false,
     handVisible: false,
     delegate: "GPU",
+    lighterActive: false,
+    lighterState: "INACTIVE",
+    lighterPoint: { x: 0.5, y: 0.5, z: 0 },
+    peaceSign: false,
+    indexExtended: false,
+    middleExtended: false,
+    ringFolded: false,
+    pinkyFolded: false,
+    indexMiddleSeparation: 0,
+    lighterHoldSeconds: 0,
+    ignitionProximitySeconds: 0,
   };
 
   private anchoredToFace = true;
@@ -61,6 +76,8 @@ export class InteractionEngine {
   private ringArmed = false;
   private ringRequiresExit = false;
   private ringQualificationStartedAt = 0;
+  private lighterHoldSeconds = 0;
+  private ignitionProximitySeconds = 0;
 
   constructor(private emit: (emission: SmokeEmission) => void) {}
 
@@ -88,6 +105,7 @@ export class InteractionEngine {
     }
 
     this.updateCigarette(face, hands, now, safeDt);
+    this.updateLighter(hands, safeDt);
     this.updateSmoking(face, now, safeDt);
     if (this.snapshot.cigaretteState !== "FALLING") this.handleOffscreen(face, now);
     this.updateStore(face, now);
@@ -213,6 +231,7 @@ export class InteractionEngine {
     const shouldInhale = face.visible
       && (isMouthState(this.snapshot.cigaretteState) || heldNearMouth)
       && face.mouthPursed
+      && this.snapshot.cigaretteLit
       && this.snapshot.cigaretteBurn < 1;
 
     if (shouldInhale) {
@@ -328,6 +347,62 @@ export class InteractionEngine {
     this.effectUntil = now + EFFECT_LABEL_MS;
   }
 
+  private updateLighter(hands: HandAnalysis[], dt: number) {
+    const hand = hands.find((candidate) => candidate.visible);
+    const cigaretteHeld = this.snapshot.cigaretteState === "HAND_HELD" || this.snapshot.cigaretteState === "FINGER_HELD";
+    const lighterGestureActive = Boolean(
+      hand?.lighterState === "ACTIVE"
+      && !cigaretteHeld
+      && this.snapshot.cigaretteState !== "FALLING",
+    );
+
+    if (hand) {
+      this.snapshot.lighterPoint = hand.lighterPoint;
+      this.snapshot.lighterState = hand.lighterState;
+      this.snapshot.peaceSign = hand.peaceSign;
+      this.snapshot.indexExtended = hand.indexExtended;
+      this.snapshot.middleExtended = hand.middleExtended;
+      this.snapshot.ringFolded = hand.ringFolded;
+      this.snapshot.pinkyFolded = hand.pinkyFolded;
+      this.snapshot.indexMiddleSeparation = hand.indexMiddleSeparation;
+    } else {
+      this.snapshot.lighterState = "INACTIVE";
+      this.snapshot.peaceSign = false;
+      this.snapshot.indexExtended = false;
+      this.snapshot.middleExtended = false;
+      this.snapshot.ringFolded = false;
+      this.snapshot.pinkyFolded = false;
+      this.snapshot.indexMiddleSeparation = 0;
+    }
+
+    this.snapshot.lighterActive = lighterGestureActive;
+    this.lighterHoldSeconds = lighterGestureActive
+      ? Math.min(1, this.lighterHoldSeconds + dt)
+      : 0;
+    this.snapshot.lighterHoldSeconds = this.lighterHoldSeconds;
+
+    const canIgnite = lighterGestureActive
+      && this.lighterHoldSeconds >= LIGHTER_HOLD_SECONDS
+      && !this.snapshot.cigaretteLit
+      && !cigaretteHeld;
+    if (canIgnite) {
+      const nearTip = distance(this.snapshot.lighterPoint, this.cigaretteTip()) <= IGNITION_RADIUS;
+      this.ignitionProximitySeconds = nearTip ? this.ignitionProximitySeconds + dt : 0;
+      if (this.ignitionProximitySeconds >= IGNITION_HOLD_SECONDS) this.snapshot.cigaretteLit = true;
+    } else {
+      this.ignitionProximitySeconds = 0;
+    }
+    this.snapshot.ignitionProximitySeconds = this.ignitionProximitySeconds;
+  }
+
+  private cigaretteTip(): Point3 {
+    return {
+      x: this.snapshot.cigarettePosition.x - Math.cos(this.snapshot.cigaretteRotation) * this.snapshot.cigaretteLength * 0.505,
+      y: this.snapshot.cigarettePosition.y - Math.sin(this.snapshot.cigaretteRotation) * this.snapshot.cigaretteLength * 0.505,
+      z: 0,
+    };
+  }
+
   private emitSmokeRing(face: FaceAnalysis, now: number) {
     this.emit({
       category: "SMOKE",
@@ -373,6 +448,13 @@ export class InteractionEngine {
     this.snapshot.cigaretteState = "IDLE";
     this.snapshot.cigaretteMouthSide = null;
     this.snapshot.cigaretteBurn = 0;
+    this.snapshot.cigaretteLit = false;
+    this.lighterHoldSeconds = 0;
+    this.ignitionProximitySeconds = 0;
+    this.snapshot.lighterActive = false;
+    this.snapshot.lighterState = "INACTIVE";
+    this.snapshot.lighterHoldSeconds = 0;
+    this.snapshot.ignitionProximitySeconds = 0;
     this.updateVisibleLength();
     this.snapshot.cigarettePosition = face.visible
       ? { x: face.center.x, y: clamp(face.chin.y + face.faceHeight * 0.48, 0.58, 0.84), z: 0 }
@@ -424,6 +506,17 @@ export class InteractionEngine {
       mouthPursed: face.mouthPursed,
       cigaretteState: this.snapshot.cigaretteState,
       smokingState: this.snapshot.smokingState,
+      lighterActive: this.snapshot.lighterActive,
+      peaceSign: this.snapshot.peaceSign,
+      indexExtended: this.snapshot.indexExtended,
+      middleExtended: this.snapshot.middleExtended,
+      ringFolded: this.snapshot.ringFolded,
+      pinkyFolded: this.snapshot.pinkyFolded,
+      indexMiddleSeparation: this.snapshot.indexMiddleSeparation,
+      flameX: this.snapshot.lighterPoint.x,
+      flameY: this.snapshot.lighterPoint.y,
+      cigaretteLit: this.snapshot.cigaretteLit,
+      ignitionProximitySeconds: this.snapshot.ignitionProximitySeconds,
       mouthOpenRatio: face.mouthOpenRatio,
       mouthWidthRatio: face.mouthWidthRatio,
       cigaretteBurn: this.snapshot.cigaretteBurn,

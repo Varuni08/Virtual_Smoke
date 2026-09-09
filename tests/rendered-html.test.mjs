@@ -56,7 +56,7 @@ function sampleFace(overrides = {}) {
   };
 }
 
-function sampleHand(state, point) {
+function sampleHand(state, point, overrides = {}) {
   const landmarks = Array.from({ length: 21 }, () => ({ ...point }));
   landmarks[8] = { ...point };
   landmarks[12] = { x: point.x, y: point.y + 0.02, z: 0 };
@@ -67,10 +67,49 @@ function sampleHand(state, point) {
     state,
     pinchDistance: state === "PINCH" ? 0.1 : 1,
     palmSize: 0.1,
+    lighterState: "INACTIVE",
+    lighterPoint: { ...point },
+    peaceSign: false,
+    indexExtended: false,
+    middleExtended: false,
+    ringFolded: false,
+    pinkyFolded: false,
+    indexMiddleSeparation: 0,
     gripPoint: { ...point },
     indexTip: { ...point },
     middleTip: { x: point.x, y: point.y + 0.02, z: 0 },
+    ...overrides,
   };
+}
+
+function cigaretteTip(snapshot) {
+  return {
+    x: snapshot.cigarettePosition.x - Math.cos(snapshot.cigaretteRotation) * snapshot.cigaretteLength * 0.505,
+    y: snapshot.cigarettePosition.y - Math.sin(snapshot.cigaretteRotation) * snapshot.cigaretteLength * 0.505,
+    z: 0,
+  };
+}
+
+function lightCigarette(engine, face, startTime) {
+  let now = startTime;
+  engine.update(face, [], now, 0.05, "GPU");
+  const point = cigaretteTip(engine.getSnapshot());
+  const lighter = {
+    lighterState: "ACTIVE",
+    lighterPoint: point,
+    peaceSign: true,
+    indexExtended: true,
+    middleExtended: true,
+    ringFolded: true,
+    pinkyFolded: true,
+    indexMiddleSeparation: 0.3,
+  };
+  for (let frame = 0; frame < 8; frame += 1) {
+    now += 50;
+    engine.update(face, [sampleHand("NONE", point, lighter)], now, 0.05, "GPU");
+  }
+  assert.equal(engine.getSnapshot().cigaretteLit, true);
+  return now;
 }
 
 function attachCigarette(engine, face, startTime = 100) {
@@ -202,6 +241,7 @@ test("emits one mouth or nose batch and burns down", async () => {
 
   const heldEngine = new InteractionEngine(() => {});
   let heldNow = 100;
+  heldNow = lightCigarette(heldEngine, face, heldNow);
   heldEngine.update(face, [sampleHand("PINCH", { x: 0.5, y: 0.7, z: 0 })], heldNow, 0.05, "GPU");
   for (let frame = 0; frame < 8; frame += 1) {
     heldNow += 50;
@@ -214,6 +254,7 @@ test("emits one mouth or nose batch and burns down", async () => {
   const emissions = [];
   const engine = new InteractionEngine((emission) => emissions.push(emission));
   let now = attachCigarette(engine, face);
+  now = lightCigarette(engine, face, now);
 
   for (let frame = 0; frame < 28; frame += 1) {
     now += 50;

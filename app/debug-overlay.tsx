@@ -41,6 +41,14 @@ export function DebugOverlay() {
         <dt>THROW VELOCITY</dt><dd>{metric(state.throwVelocityX)} / {metric(state.throwVelocityY)}</dd>
         <dt>THROW STRENGTH</dt><dd>{metric(state.throwStrength)}</dd>
         <dt>THROW AGE</dt><dd>{metric(state.throwAge, 3)}s</dd>
+        <dt>LIGHTER</dt><dd>{state.lighterActive ? "ACTIVE" : "OFF"}</dd>
+        <dt>PEACE SIGN</dt><dd>{state.peaceSign ? "YES" : "NO"}</dd>
+        <dt>FINGERS I/M</dt><dd>{state.indexExtended ? "EXT" : "FOLD"} / {state.middleExtended ? "EXT" : "FOLD"}</dd>
+        <dt>FINGERS R/P</dt><dd>{state.ringFolded ? "FOLD" : "EXT"} / {state.pinkyFolded ? "FOLD" : "EXT"}</dd>
+        <dt>V SEPARATION</dt><dd>{metric(state.indexMiddleSeparation)}</dd>
+        <dt>FLAME X / Y</dt><dd>{metric(state.flameX)} / {metric(state.flameY)}</dd>
+        <dt>CIGARETTE LIT</dt><dd>{state.cigaretteLit ? "YES" : "NO"}</dd>
+        <dt>IGNITION</dt><dd>{metric(state.ignitionProximitySeconds, 2)}s</dd>
         <dt>MOUTH STATE</dt><dd>{state.mouthState}</dd>
         <dt>MOUTH SHAPE</dt><dd>{state.mouthShape}</dd>
         <dt>CIGARETTE</dt><dd>{state.cigaretteState}</dd>

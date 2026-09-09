@@ -1,6 +1,6 @@
-import type { FaceGestureState, HandGestureState, HandState, MouthState } from "./gestures";
+import type { FaceGestureState, HandGestureState, HandState, LighterState, MouthState, PeaceGestureState } from "./gestures";
 
-export type { HandState, MouthShape, MouthState } from "./gestures";
+export type { HandState, LighterState, MouthShape, MouthState, PeaceGestureState } from "./gestures";
 
 export type Point3 = { x: number; y: number; z: number };
 
@@ -46,7 +46,7 @@ export interface FaceAnalysis extends FaceGestureState {
   roll: number;
 }
 
-export interface HandAnalysis extends HandGestureState {
+export interface HandAnalysis extends HandGestureState, PeaceGestureState {
   id: string;
   visible: boolean;
   landmarks: Point3[];
@@ -55,6 +55,8 @@ export interface HandAnalysis extends HandGestureState {
   velocity: Point3;
   speed: number;
   pinchPoint: Point3;
+  lighterState: LighterState;
+  lighterPoint: Point3;
   state: HandState;
   pinchDistance: number;
   palmSize: number;
@@ -87,10 +89,22 @@ export interface InteractionSnapshot {
   cigaretteBaseLength: number;
   cigaretteLength: number;
   cigaretteBurn: number;
+  cigaretteLit: boolean;
   cigaretteMouthSide: "LEFT" | "CENTER" | "RIGHT" | null;
   inhaleSeconds: number;
   smokeReady: boolean;
   pinchDistance: number;
+  lighterActive: boolean;
+  lighterState: LighterState;
+  lighterPoint: Point3;
+  peaceSign: boolean;
+  indexExtended: boolean;
+  middleExtended: boolean;
+  ringFolded: boolean;
+  pinkyFolded: boolean;
+  indexMiddleSeparation: number;
+  lighterHoldSeconds: number;
+  ignitionProximitySeconds: number;
   faceVisible: boolean;
   handVisible: boolean;
   delegate: "GPU" | "CPU";

@@ -1,5 +1,5 @@
 import { clamp, distance, expSmoothing, lerp, lerpPoint, midpoint, mirrorPoint } from "./math";
-import type { MouthShape, MouthState } from "./gestures";
+import type { LighterState, MouthShape, MouthState } from "./gestures";
 import type { FaceAnalysis, HandAnalysis, Point3 } from "./types";
 
 const FACE = {
@@ -24,8 +24,16 @@ const HAND = {
   middleMcp: 9,
   middlePip: 10,
   middleTip: 12,
+  ringPip: 14,
+  ringTip: 16,
   pinkyMcp: 17,
+  pinkyPip: 18,
+  pinkyTip: 20,
 };
+
+const PEACE_ENTER_SEPARATION = 0.22;
+const PEACE_EXIT_SEPARATION = 0.18;
+const FOLDED_FINGER_TOLERANCE = 1.12;
 
 const O_SHAPE_CALIBRATION = {
   enterOpenRatio: 0.11,
@@ -171,9 +179,11 @@ export class FaceAnalyzer {
 
 export class HandAnalyzer {
   private previous = new Map<string, { position: Point3; velocity: Point3 }>();
+  private peaceStates = new Map<string, boolean>();
 
   reset() {
     this.previous.clear();
+    this.peaceStates.clear();
   }
 
   analyze(rawHands: Point3[][], handedness: string[], includeDebugLandmarks = false, dt = 1 / 60): HandAnalysis[] {
@@ -218,8 +228,21 @@ export class HandAnalyzer {
       const pinchPoint = midpoint(thumbTip, indexTip);
       const indexExtended = distance(indexTip, wrist) > distance(mirroredAt(HAND.indexPip), wrist) * 1.12;
       const middleExtended = distance(middleTip, wrist) > distance(mirroredAt(HAND.middlePip), wrist) * 1.1;
-      const fingerSeparation = distance(indexTip, middleTip) / palmSize;
-      const fingerHold = indexExtended && middleExtended && fingerSeparation > 0.12 && fingerSeparation < 0.52;
+      const ringFolded = distance(mirroredAt(HAND.ringTip), wrist)
+        <= distance(mirroredAt(HAND.ringPip), wrist) * FOLDED_FINGER_TOLERANCE;
+      const pinkyFolded = distance(mirroredAt(HAND.pinkyTip), wrist)
+        <= distance(mirroredAt(HAND.pinkyPip), wrist) * FOLDED_FINGER_TOLERANCE;
+      const indexMiddleSeparation = distance(indexTip, middleTip) / palmSize;
+      const wasPeaceActive = this.peaceStates.get(id) ?? false;
+      const separationThreshold = wasPeaceActive ? PEACE_EXIT_SEPARATION : PEACE_ENTER_SEPARATION;
+      const peaceSign = indexExtended
+        && middleExtended
+        && ringFolded
+        && pinkyFolded
+        && indexMiddleSeparation >= separationThreshold;
+      const lighterState: LighterState = peaceSign ? "ACTIVE" : "INACTIVE";
+      this.peaceStates.set(id, peaceSign);
+      const fingerHold = indexExtended && middleExtended && indexMiddleSeparation > 0.12 && indexMiddleSeparation < 0.52;
       const state = pinchDistance < 0.29 ? "PINCH" : fingerHold ? "INDEX_MIDDLE_HOLD" : "NONE";
       const gripPoint = state === "INDEX_MIDDLE_HOLD" ? midpoint(indexTip, middleTip) : pinchPoint;
       return {
@@ -231,6 +254,14 @@ export class HandAnalyzer {
         velocity,
         speed,
         pinchPoint,
+        peaceSign,
+        indexExtended,
+        middleExtended,
+        ringFolded,
+        pinkyFolded,
+        indexMiddleSeparation,
+        lighterState,
+        lighterPoint: midpoint(indexTip, middleTip),
         state,
         pinchDistance,
         palmSize,

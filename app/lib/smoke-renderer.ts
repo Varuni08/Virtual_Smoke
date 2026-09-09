@@ -191,6 +191,43 @@ const fragmentShader = `
   }
 `;
 
+const flameVertexShader = `
+  uniform float uTime;
+  uniform float uLean;
+  varying vec2 vUv;
+
+  void main() {
+    vUv = uv;
+    vec3 transformed = position;
+    float flicker = sin(uTime * 18.0 + uv.y * 5.0) * 0.004
+      + sin(uTime * 29.0 + uv.y * 8.0) * 0.002;
+    transformed.x += flicker * smoothstep(0.0, 1.0, uv.y) + uLean * uv.y * 0.7;
+    transformed.y += sin(uTime * 22.0 + uv.x * 6.0) * 0.002 * uv.y;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
+  }
+`;
+
+const flameFragmentShader = `
+  precision highp float;
+  uniform float uOpacity;
+  varying vec2 vUv;
+
+  void main() {
+    vec2 point = vUv * 2.0 - 1.0;
+    float lower = smoothstep(-1.0, -0.82, point.y);
+    float upper = 1.0 - smoothstep(0.42, 1.0, point.y);
+    float taper = smoothstep(-0.2, 0.86, point.y);
+    float outerWidth = mix(0.48, 0.1, taper);
+    float coreWidth = mix(0.25, 0.04, taper);
+    float outer = 1.0 - smoothstep(outerWidth, outerWidth + 0.12, abs(point.x));
+    float core = 1.0 - smoothstep(coreWidth, coreWidth + 0.09, abs(point.x));
+    float alpha = outer * lower * upper * uOpacity;
+    vec3 color = mix(vec3(1.0, 0.24, 0.015), vec3(1.0, 0.96, 0.68), core);
+    if (alpha < 0.002) discard;
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
 type Quality = "HIGH" | "MEDIUM" | "LOW";
 
 export interface RendererDiagnostics {
@@ -208,6 +245,7 @@ export class SmokeRenderer {
   private cigarette = new THREE.Group();
   private ember = new THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>();
   private glow = new THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>();
+  private flame: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private lipMask: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
   private particleGeometry = new THREE.BufferGeometry();
   private particleMaterial: THREE.ShaderMaterial;
@@ -258,6 +296,9 @@ export class SmokeRenderer {
   private throwStrength = 0;
   private throwRadius = 0.15;
   private throwAge = 2;
+  private flamePosition = new THREE.Vector2(0.5, 0.5);
+  private flameTargetPosition = new THREE.Vector2(0.5, 0.5);
+  private flameStrength = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -288,6 +329,28 @@ export class SmokeRenderer {
     });
     this.cigarette.frustumCulled = false;
     this.scene.add(this.cigarette);
+
+    this.flame = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.065, 0.125),
+      new THREE.ShaderMaterial({
+        vertexShader: flameVertexShader,
+        fragmentShader: flameFragmentShader,
+        uniforms: {
+          uTime: { value: 0 },
+          uLean: { value: 0 },
+          uOpacity: { value: 0 },
+        },
+        transparent: true,
+        depthWrite: false,
+        depthTest: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      }),
+    );
+    this.flame.position.z = 0.42;
+    this.flame.renderOrder = 3;
+    this.flame.visible = false;
+    this.scene.add(this.flame);
 
     this.lipMask = new THREE.Mesh(
       new THREE.CircleGeometry(0.5, 28),
@@ -472,6 +535,7 @@ export class SmokeRenderer {
     this.updateHandInfluence(hand, handAgeMs, dt);
     this.updatePinchInfluence(snapshot, hand, handAgeMs, dt);
     this.updateThrowState(dt);
+    this.updateFlame(snapshot, hand, handAgeMs, now, dt);
 
     const mapped = this.mapPoint(snapshot.cigarettePosition);
     const mappedLength = this.mapLength(snapshot.cigaretteLength);
@@ -483,12 +547,14 @@ export class SmokeRenderer {
     // Only convert normalized X units to normalized Y units here; applying 0.1
     // again made the cigarette just 2–3 physical pixels thick.
     this.cigarette.scale.set(mappedLength, mappedBaseLength * (this.width / this.height) * 1.15, 1);
-    const burning = snapshot.smokingState === "INHALING";
+    const burning = snapshot.cigaretteLit && snapshot.smokingState === "INHALING";
     const flicker = 0.9 + Math.sin(now * 0.013) * 0.08 + Math.sin(now * 0.037) * 0.035;
+    this.ember.visible = snapshot.cigaretteLit;
+    this.glow.visible = snapshot.cigaretteLit;
     this.ember.scale.setScalar(flicker);
-    this.ember.material.color.setHex(burning ? 0xff4b1f : 0x665f59);
+    this.ember.material.color.setHex(burning ? 0xff4b1f : snapshot.cigaretteLit ? 0xb84b24 : 0x665f59);
     this.glow.scale.setScalar(0.92 + Math.sin(now * 0.009) * 0.08);
-    this.glow.material.opacity = burning ? 0.34 : 0.025;
+    this.glow.material.opacity = snapshot.cigaretteLit ? (burning ? 0.34 : 0.1) : 0;
 
     const mouthAttached = snapshot.cigaretteMouthSide !== null && (face.visible || face.inGracePeriod);
     this.lipMask.visible = mouthAttached;
@@ -849,6 +915,31 @@ export class SmokeRenderer {
         throwAge: this.throwAge <= 1.05 ? this.throwAge : 0,
       });
     }
+  }
+
+  private updateFlame(
+    snapshot: InteractionSnapshot,
+    hand: HandAnalysis | undefined,
+    handAgeMs: number,
+    now: number,
+    dt: number,
+  ) {
+    const active = Boolean(snapshot.lighterActive && hand?.visible && handAgeMs <= HAND_STALE_MS);
+    if (active) {
+      const target = this.mapPoint(snapshot.lighterPoint);
+      this.flameTargetPosition.set(target.x, target.y);
+      this.flamePosition.lerp(this.flameTargetPosition, expSmoothing(dt, 30));
+      this.flameStrength = lerp(this.flameStrength, 1, expSmoothing(dt, 34));
+    } else {
+      this.flameStrength = lerp(this.flameStrength, 0, expSmoothing(dt, 32));
+    }
+    this.flame.position.x = this.flamePosition.x;
+    this.flame.position.y = this.flamePosition.y - 0.035 * this.flameStrength;
+    this.flame.scale.set(1, this.width / this.height, 1);
+    this.flame.material.uniforms.uTime.value = now / 1000;
+    this.flame.material.uniforms.uOpacity.value = this.flameStrength * 0.9;
+    this.flame.material.uniforms.uLean.value = clamp(-this.handVelocity.x * 0.018, -0.012, 0.012);
+    this.flame.visible = this.flameStrength > 0.01;
   }
 
   private qualityFactor() {
